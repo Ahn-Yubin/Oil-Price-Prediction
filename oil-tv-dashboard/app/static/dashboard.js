@@ -188,19 +188,19 @@ function ensureChart() {
   const container = document.getElementById("oilChart");
   chartRef = LightweightCharts.createChart(container, {
     layout: {
-      background: { type: "solid", color: "#ffffff" },
-      textColor: "#131722",
+      background: { type: "solid", color: "#151b23" },
+      textColor: "#8b949e",
     },
     rightPriceScale: {
-      borderColor: "#D1D4DC",
+      borderColor: "#30363d",
     },
     timeScale: {
-      borderColor: "#D1D4DC",
+      borderColor: "#30363d",
       timeVisible: true,
     },
     grid: {
-      vertLines: { color: "#F0F3FA" },
-      horzLines: { color: "#F0F3FA" },
+      vertLines: { color: "#21262d" },
+      horzLines: { color: "#21262d" },
     },
     crosshair: {
       mode: LightweightCharts.CrosshairMode.Normal,
@@ -247,31 +247,31 @@ function ensureChart() {
 
   predBandFillRef = createAreaSeries({
     title: "Forecast CI",
-    lineColor: "rgba(41, 98, 255, 0.0)",
-    topColor: "rgba(41, 98, 255, 0.22)",
-    bottomColor: "rgba(41, 98, 255, 0.03)",
+    lineColor: "rgba(88, 166, 255, 0.0)",
+    topColor: "rgba(88, 166, 255, 0.24)",
+    bottomColor: "rgba(88, 166, 255, 0.04)",
     lineWidth: 1,
   });
   // Mask lower half so only [lower, upper] band stays visible.
   predBandMaskRef = createAreaSeries({
-    lineColor: "rgba(255,255,255,0.0)",
-    topColor: "rgba(255,255,255,1.0)",
-    bottomColor: "rgba(255,255,255,1.0)",
+    lineColor: "rgba(21,27,35,0.0)",
+    topColor: "rgba(21,27,35,1.0)",
+    bottomColor: "rgba(21,27,35,1.0)",
     lineWidth: 1,
   });
 
   candleSeriesRef = createCandlestickSeries({
     title: "Actual OHLC",
-    upColor: "#26A69A",
-    downColor: "#EF5350",
-    borderUpColor: "#26A69A",
-    borderDownColor: "#EF5350",
-    wickUpColor: "#26A69A",
-    wickDownColor: "#EF5350",
+    upColor: "#2dd4bf",
+    downColor: "#ff7b72",
+    borderUpColor: "#2dd4bf",
+    borderDownColor: "#ff7b72",
+    wickUpColor: "#2dd4bf",
+    wickDownColor: "#ff7b72",
   });
   predSeriesRef = createLineSeries({
     title: "Predicted",
-    color: "#2962FF",
+    color: "#58a6ff",
     lineWidth: 2.2,
     lineStyle:
       LightweightCharts.LineStyle && LightweightCharts.LineStyle.Dashed !== undefined
@@ -280,12 +280,12 @@ function ensureChart() {
   });
   predUpperSeriesRef = createLineSeries({
     title: "Pred Upper",
-    color: "rgba(41, 98, 255, 0.45)",
+    color: "rgba(88, 166, 255, 0.56)",
     lineWidth: 1.2,
   });
   predLowerSeriesRef = createLineSeries({
     title: "Pred Lower",
-    color: "rgba(41, 98, 255, 0.45)",
+    color: "rgba(88, 166, 255, 0.56)",
     lineWidth: 1.2,
   });
 
