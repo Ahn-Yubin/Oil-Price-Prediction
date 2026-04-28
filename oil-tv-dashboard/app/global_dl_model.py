@@ -312,6 +312,7 @@ def _train_mlp(X: np.ndarray, Y: np.ndarray, val_mask: np.ndarray, epochs: int =
     one_step_true = Y_val[:, 0]
     val_mae = float(np.mean(np.abs(one_step_true - one_step_pred)))
     val_rmse = float(np.sqrt(np.mean((one_step_true - one_step_pred) ** 2)))
+    val_mape = float(np.mean(np.abs(np.exp(one_step_pred - one_step_true) - 1.0)) * 100)
 
     return {
         "params": params,
@@ -322,6 +323,7 @@ def _train_mlp(X: np.ndarray, Y: np.ndarray, val_mask: np.ndarray, epochs: int =
         "cum_resid_std": cum_resid_std,
         "val_mae_ret": val_mae,
         "val_rmse_ret": val_rmse,
+        "val_mape_pct": val_mape,
         "n_train": int(len(X_train)),
         "n_val": int(len(X_val)),
     }
@@ -337,6 +339,7 @@ def _save_model(interval: str, horizon: int, bundle: dict, window: int, symbols:
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "val_mae_ret": bundle["val_mae_ret"],
         "val_rmse_ret": bundle["val_rmse_ret"],
+        "val_mape_pct": bundle["val_mape_pct"],
         "n_train": bundle["n_train"],
         "n_val": bundle["n_val"],
     }
@@ -469,7 +472,12 @@ def forecast_with_global_model(
     close = np.asarray(close, dtype=np.float64)
     if len(close) < 4:
         flat = np.repeat(close[-1], horizon)
-        info = {"model_name": "Global DL MLP (insufficient data)", "val_mae_ret": None, "val_rmse_ret": None}
+        info = {
+            "model_name": "Global DL MLP (insufficient data)",
+            "val_mae_ret": None,
+            "val_rmse_ret": None,
+            "val_mape_pct": None,
+        }
         return flat, flat, flat, info
 
     returns = np.diff(np.log(close))
@@ -499,6 +507,7 @@ def forecast_with_global_model(
         "model_name": "Global DL MLP (pretrained, multi-horizon)",
         "val_mae_ret": model["meta"].get("val_mae_ret"),
         "val_rmse_ret": model["meta"].get("val_rmse_ret"),
+        "val_mape_pct": model["meta"].get("val_mape_pct"),
         "trained_at": model["meta"].get("trained_at"),
         "train_symbols": model["meta"].get("symbols", []),
         "n_train": model["meta"].get("n_train"),

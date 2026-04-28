@@ -24,11 +24,11 @@
               placeholder="or"
               autocomplete="off"
               spellcheck="false"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="symbol-dropdown"
             />
-            <button id="symbol-search" class="symbol-search-btn" type="button">Search</button>
-            <button id="symbol-toggle" class="symbol-toggle" type="button" aria-label="추천 검색어 열기">
-              ▾
-            </button>
           </div>
           <div id="symbol-dropdown" class="symbol-dropdown hidden" role="listbox">
             <button class="symbol-option active" type="button" data-symbol="NYMEX:CL1!">NYMEX:CL1!</button>
@@ -65,25 +65,16 @@
           <p id="mape-value">-</p>
         </article>
         <article class="metric-card">
-          <h3>Updated</h3>
-          <p id="updated-value">-</p>
-        </article>
-        <article class="metric-card">
-          <h3>Symbol</h3>
-          <p id="symbol-value">-</p>
-        </article>
-        <article class="metric-card">
-          <h3>Source</h3>
-          <p id="source-value">-</p>
-        </article>
-        <article class="metric-card">
           <h3>Model</h3>
           <p id="model-value">-</p>
         </article>
       </section>
 
       <section class="chart-panel">
-        <h3>TradingView-Style Live Chart + AI Forecast</h3>
+        <div class="chart-panel-head">
+          <h3>TradingView-Style Live Chart + AI Forecast</h3>
+          <p id="chart-updated-value">Updated -</p>
+        </div>
         <div class="chart-wrap">
           <div id="tv-legend" class="tv-legend"></div>
           <div id="oilChart"></div>

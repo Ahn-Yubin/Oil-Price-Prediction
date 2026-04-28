@@ -414,6 +414,18 @@ def _backtest_metrics(close: np.ndarray, interval: str, lags: int = 12, test_siz
     return {"mae": mae, "rmse": rmse, "mape": mape}
 
 
+def _mape_from_return_error(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        mae_ret = abs(float(value))
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(mae_ret):
+        return None
+    return float((np.exp(mae_ret) - 1.0) * 100)
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
@@ -477,7 +489,8 @@ def chart_data(symbol: str = "NYMEX:CL1!", interval: str = "1d"):
         metrics = {
             "mae": model_info.get("val_mae_ret"),
             "rmse": model_info.get("val_rmse_ret"),
-            "mape": None,
+            "mape": model_info.get("val_mape_pct")
+            or _mape_from_return_error(model_info.get("val_mae_ret")),
             "symbol": resolved_symbol,
             "model": model_info.get("model_name", "Global DL model"),
         }
@@ -559,7 +572,8 @@ def chart_data(symbol: str = "NYMEX:CL1!", interval: str = "1d"):
         metrics = {
             "mae": model_info.get("val_mae_ret"),
             "rmse": model_info.get("val_rmse_ret"),
-            "mape": None,
+            "mape": model_info.get("val_mape_pct")
+            or _mape_from_return_error(model_info.get("val_mae_ret")),
             "model": model_info.get("model_name", "Global DL model"),
             "symbol": "fallback-baseline",
         }

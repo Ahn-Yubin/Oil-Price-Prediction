@@ -29,11 +29,13 @@ function updateSymbolSuggestionState() {
 function openSymbolDropdown() {
   const dd = document.getElementById("symbol-dropdown");
   dd?.classList.remove("hidden");
+  document.getElementById("symbol-input")?.setAttribute("aria-expanded", "true");
 }
 
 function closeSymbolDropdown() {
   const dd = document.getElementById("symbol-dropdown");
   dd?.classList.add("hidden");
+  document.getElementById("symbol-input")?.setAttribute("aria-expanded", "false");
 }
 
 async function loadData(symbol, interval) {
@@ -64,19 +66,15 @@ function formatMetric(value, suffix = "") {
   return `${Number(value).toFixed(3)}${suffix}`;
 }
 
-function setMetrics(metrics, updatedAt, symbolResolved, forecastHorizon, confidenceLevel) {
+function setMetrics(metrics, updatedAt, forecastHorizon, confidenceLevel) {
   document.getElementById("mae-value").textContent = formatMetric(metrics.mae);
   document.getElementById("rmse-value").textContent = formatMetric(metrics.rmse);
   document.getElementById("mape-value").textContent = formatMetric(metrics.mape, "%");
-  document.getElementById("updated-value").textContent = new Date(updatedAt).toLocaleString();
-  document.getElementById("symbol-value").textContent = symbolResolved || metrics.symbol || "-";
+  document.getElementById("chart-updated-value").textContent =
+    `Updated ${new Date(updatedAt).toLocaleString()}`;
   const ci = confidenceLevel ? `${Math.round(confidenceLevel * 100)}% CI` : "CI";
   const horizonText = forecastHorizon ? `, ${forecastHorizon} steps` : "";
   document.getElementById("model-value").textContent = `${metrics.model || "-"} (${ci}${horizonText})`;
-}
-
-function setSource(source) {
-  document.getElementById("source-value").textContent = source || "-";
 }
 
 function setStatus(message) {
@@ -306,6 +304,48 @@ function ensureChart() {
   }
 }
 
+function setInitialForecastView(payload) {
+  const timeScale = chartRef.timeScale();
+  if (typeof timeScale.setVisibleLogicalRange !== "function") {
+    timeScale.fitContent();
+    return;
+  }
+
+  const candles = payload.candles || [];
+  const predicted = payload.predicted || [];
+  if (!candles.length || predicted.length < 2) {
+    timeScale.fitContent();
+    return;
+  }
+
+  const lastCandle = candles[candles.length - 1];
+  const forecastStartsOnLastCandle = String(predicted[0]?.time) === String(lastCandle?.time);
+  const forecastStartIndex = forecastStartsOnLastCandle ? candles.length - 1 : candles.length;
+  const interval = payload.interval_resolved || "1d";
+  const futureBars = Math.max(1, predicted.length - 1);
+  const rightPadding = Math.max(8, Math.round(futureBars * 0.18));
+  const forecastPosition = 0.62;
+  const minPastBarsByInterval = {
+    "1d": 90,
+    "1h": 160,
+    "30m": 180,
+    "15m": 220,
+  };
+  const pastBars = Math.max(
+    minPastBarsByInterval[interval] || 90,
+    24,
+    Math.round(((futureBars + rightPadding) * forecastPosition) / (1 - forecastPosition)),
+  );
+  const from = Math.max(0, forecastStartIndex - pastBars);
+  const to = forecastStartIndex + futureBars + rightPadding;
+
+  if (to > from) {
+    timeScale.setVisibleLogicalRange({ from, to });
+    return;
+  }
+  timeScale.fitContent();
+}
+
 function renderChart(payload, resetView = false) {
   ensureChart();
   latestPayload = payload;
@@ -327,7 +367,7 @@ function renderChart(payload, resetView = false) {
   refreshLegendDefault();
 
   if (resetView) {
-    timeScale.fitContent();
+    setInitialForecastView(payload);
     return;
   }
 
@@ -348,11 +388,9 @@ async function initDashboard(symbol, interval) {
     setMetrics(
       payload.metrics,
       payload.updated_at,
-      payload.symbol_resolved,
       payload.forecast_horizon,
       payload.confidence_level,
     );
-    setSource(payload.data_source === "yfinance" ? "live-yfinance" : payload.data_source);
     setStatus(payload.warning || null);
     try {
       const nextDataKey = `${payload.symbol_input}|${payload.interval_resolved}`;
@@ -368,7 +406,7 @@ async function initDashboard(symbol, interval) {
   } catch (error) {
     if (reqId !== requestVersion) return;
     console.error(error);
-    document.getElementById("updated-value").textContent = "Data load failed";
+    document.getElementById("chart-updated-value").textContent = "Updated -";
     setStatus(`API 요청 실패: ${error?.message || "서버 로그를 확인하세요."}`);
   } finally {
     if (reqId === requestVersion && loadBtn) {
@@ -380,8 +418,6 @@ async function initDashboard(symbol, interval) {
 function bindControls() {
   const input = document.getElementById("symbol-input");
   const combobox = document.getElementById("symbol-combobox");
-  const searchBtn = document.getElementById("symbol-search");
-  const toggle = document.getElementById("symbol-toggle");
   const dropdown = document.getElementById("symbol-dropdown");
   const intervalInput = document.getElementById("interval-input");
   const button = document.getElementById("load-button");
@@ -402,16 +438,6 @@ function bindControls() {
     triggerSearch();
   });
 
-  searchBtn?.addEventListener("click", triggerSearch);
-  toggle.addEventListener("click", () => {
-    updateSymbolSuggestionState();
-    const dd = document.getElementById("symbol-dropdown");
-    if (dd?.classList.contains("hidden")) {
-      openSymbolDropdown();
-    } else {
-      closeSymbolDropdown();
-    }
-  });
   button.addEventListener("click", triggerSearch);
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
