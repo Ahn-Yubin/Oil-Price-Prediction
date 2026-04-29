@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Universal Market Forecast Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="header">
+        <h1>Universal Market Forecast Dashboard</h1>
+        <p>TradingView Lightweight Charts로 실제 시장 데이터와 확률적 예측 경로를 시각화</p>
+      </section>
+
+      <section class="controls">
+        <label for="symbol-input">Symbol</label>
+        <div class="symbol-combobox" id="symbol-combobox">
+          <div class="search-shell">
+            <span class="search-icon">⌕</span>
+            <input
+              id="symbol-input"
+              value="NYMEX:CL1!"
+              placeholder="or"
+              autocomplete="off"
+              spellcheck="false"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded="false"
+              aria-controls="symbol-dropdown"
+            />
+          </div>
+          <div id="symbol-dropdown" class="symbol-dropdown hidden" role="listbox">
+            <button class="symbol-option active" type="button" data-symbol="NYMEX:CL1!">NYMEX:CL1!</button>
+            <button class="symbol-option" type="button" data-symbol="ICEEUR:BRN1!">ICEEUR:BRN1!</button>
+            <button class="symbol-option" type="button" data-symbol="TVC:USOIL">TVC:USOIL</button>
+            <button class="symbol-option" type="button" data-symbol="TVC:UKOIL">TVC:UKOIL</button>
+            <button class="symbol-option" type="button" data-symbol="TVC:DXY">TVC:DXY</button>
+            <button class="symbol-option" type="button" data-symbol="FX_IDC:USDKRW">FX_IDC:USDKRW</button>
+            <button class="symbol-option" type="button" data-symbol="OANDA:XAUUSD">OANDA:XAUUSD</button>
+          </div>
+        </div>
+        <label for="interval-input">Interval</label>
+        <select id="interval-input">
+          <option value="1d" selected>1D</option>
+          <option value="1h">1H</option>
+          <option value="30m">30M</option>
+          <option value="15m">15M</option>
+        </select>
+        <label for="scenario-input">Scenario</label>
+        <select id="scenario-input">
+          <option value="base" selected>Base</option>
+          <option value="bull">Bull</option>
+          <option value="bear">Bear</option>
+        </select>
+        <label class="toggle-label" for="advanced-toggle">
+          <input id="advanced-toggle" type="checkbox" />
+          Advanced
+        </label>
+        <button id="load-button" type="button">Refresh</button>
+      </section>
+      <section id="status-banner" class="status-banner hidden"></section>
+
+      <section class="metrics">
+        <article class="metric-card">
+          <h3>MAE</h3>
+          <p id="mae-value">-</p>
+        </article>
+        <article class="metric-card">
+          <h3>RMSE</h3>
+          <p id="rmse-value">-</p>
+        </article>
+        <article class="metric-card">
+          <h3>MAPE</h3>
+          <p id="mape-value">-</p>
+        </article>
+        <article class="metric-card">
+          <h3>Model</h3>
+          <p id="model-value">-</p>
+        </article>
+      </section>
+
+      <section class="chart-panel">
+        <div class="chart-panel-head">
+          <h3>TradingView-Style Live Chart + AI Forecast</h3>
+          <div class="chart-meta">
+            <span id="data-status-badge" class="data-status-badge">DATA -</span>
+            <span id="confidence-badge" class="data-status-badge">CONF -</span>
+            <span id="regime-badge" class="data-status-badge">REGIME -</span>
+            <p id="chart-updated-value">Updated -</p>
+          </div>
+        </div>
+        <div id="model-overlay-legend" class="model-overlay-legend"></div>
+        <div class="chart-wrap">
+          <div id="tv-legend" class="tv-legend"></div>
+          <div id="oilChart"></div>
+        </div>
+      </section>
+
+      <section id="explanation-panel" class="explanation-panel">
+        <div class="explanation-head">
+          <h3>Why this forecast?</h3>
+          <span>Context encoder</span>
+        </div>
+        <p id="explanation-summary">-</p>
+        <ul id="explanation-drivers"></ul>
+        <p id="explanation-warning" class="explanation-warning"></p>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="/static/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,49 @@
+{
+  "model_name": "pattern_mlp",
+  "model_type": "global_dl_mlp",
+  "version": "legacy_npz_v1",
+  "artifact_file": "global_dl_1h_h72.npz",
+  "created_at": "2026-04-28T15:24:35.460461+00:00",
+  "train_start": null,
+  "train_end": null,
+  "training_cutoff": "2026-04-28T15:24:35.460461+00:00",
+  "asset_universe": [
+    "CL=F",
+    "BZ=F",
+    "NG=F",
+    "RB=F",
+    "HO=F",
+    "GC=F",
+    "SI=F",
+    "DX-Y.NYB",
+    "USDKRW=X",
+    "EURUSD=X",
+    "JPY=X",
+    "SPY",
+    "QQQ",
+    "XLE",
+    "USO"
+  ],
+  "supported_asset_classes": [
+    "unknown"
+  ],
+  "supported_intervals": [
+    "1h"
+  ],
+  "lookback": 96,
+  "horizon": 72,
+  "target": "volatility_scaled_cumulative_returns",
+  "feature_set": "pattern_features_v4_cum_path",
+  "scaler": "recent_realized_volatility",
+  "data_hash": null,
+  "git_commit": null,
+  "metrics": {
+    "val_mae_ret": 0.004439853597432375,
+    "val_rmse_ret": 0.009346638806164265,
+    "val_mape_pct": 0.4441426694393158,
+    "n_train": 16818,
+    "n_val": 2300
+  },
+  "notes": null,
+  "status": "legacy"
+}

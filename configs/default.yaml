@@ -1,0 +1,6 @@
+app_env: development
+default_symbol: NYMEX:CL1!
+default_interval: 1d
+model_dir: artifacts/models
+metadata_dir: artifacts/metadata
+data_dir: data

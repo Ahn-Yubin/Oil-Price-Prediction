@@ -1,0 +1,3 @@
+app_env: development
+allow_mock_data: false
+enable_llm_context: false
