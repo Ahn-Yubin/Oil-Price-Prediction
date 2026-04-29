@@ -13,6 +13,9 @@ from market_ai.schemas.market import AssetClass, ModelInfo, ModelMetadata
 
 
 MODEL_FILENAME_RE = re.compile(r"global_dl_(?P<interval>.+)_h(?P<horizon>\d+)\.npz$")
+DEEP_MODEL_FILENAME_RE = re.compile(
+    r"(?P<model_name>deep_lstm_tcn_fusion|llm_context_seq_moe)_(?P<interval>.+)_h(?P<horizon>\d+)\.pt$"
+)
 
 
 class ModelArtifactNotFound(RuntimeError):
@@ -47,8 +50,15 @@ def _read_npz_embedded_meta(path: Path) -> dict[str, Any] | None:
 def _filename_interval_horizon(path: Path) -> tuple[str | None, int | None]:
     match = MODEL_FILENAME_RE.match(path.name)
     if not match:
+        match = DEEP_MODEL_FILENAME_RE.match(path.name)
+    if not match:
         return None, None
     return match.group("interval"), int(match.group("horizon"))
+
+
+def _filename_model_name(path: Path) -> str | None:
+    match = DEEP_MODEL_FILENAME_RE.match(path.name)
+    return match.group("model_name") if match else None
 
 
 def _metadata_from_raw(path: Path, raw: dict[str, Any], *, status: str = "available") -> ModelMetadata:
@@ -63,9 +73,9 @@ def _metadata_from_raw(path: Path, raw: dict[str, Any], *, status: str = "availa
     }
     metrics.update(raw.get("metrics") or {})
     return ModelMetadata(
-        model_name=str(raw.get("model_name") or "pattern_mlp"),
-        model_type=str(raw.get("model_type") or "global_dl_mlp"),
-        version=str(raw.get("version") or "legacy_npz_v1"),
+        model_name=str(raw.get("model_name") or _filename_model_name(path) or "pattern_mlp"),
+        model_type=str(raw.get("model_type") or ("deep_sequence" if path.suffix == ".pt" else "global_dl_mlp")),
+        version=str(raw.get("version") or ("deep_v1" if path.suffix == ".pt" else "legacy_npz_v1")),
         artifact_file=path.name,
         created_at=raw.get("created_at") or raw.get("trained_at"),
         train_start=raw.get("train_start"),
@@ -89,10 +99,11 @@ def _metadata_from_raw(path: Path, raw: dict[str, Any], *, status: str = "availa
 
 def legacy_metadata_for_artifact(path: Path) -> ModelMetadata:
     interval, horizon = _filename_interval_horizon(path)
+    filename_model = _filename_model_name(path)
     return ModelMetadata(
-        model_name="pattern_mlp",
-        model_type="global_dl_mlp",
-        version="legacy_npz_without_metadata",
+        model_name=filename_model or "pattern_mlp",
+        model_type="deep_sequence" if path.suffix == ".pt" else "global_dl_mlp",
+        version="deep_without_metadata" if path.suffix == ".pt" else "legacy_npz_without_metadata",
         artifact_file=path.name,
         created_at=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat() if path.exists() else None,
         training_cutoff=None,
@@ -106,7 +117,7 @@ def legacy_metadata_for_artifact(path: Path) -> ModelMetadata:
         scaler="recent_realized_volatility",
         metrics={},
         notes="Legacy artifact without embedded or sidecar metadata.",
-        status="legacy",
+        status="metadata_missing" if path.suffix == ".pt" else "legacy",
     )
 
 
@@ -166,7 +177,7 @@ class ModelRegistry:
     def scan(self) -> list[ModelMetadata]:
         if not self.model_dir.exists():
             return []
-        artifacts = sorted(self.model_dir.glob("*.npz"))
+        artifacts = sorted([*self.model_dir.glob("*.npz"), *self.model_dir.glob("*.pt")])
         return [metadata_for_artifact(path, metadata_dir=self.settings.metadata_dir) for path in artifacts]
 
     def list_model_info(self) -> list[ModelInfo]:
@@ -195,11 +206,14 @@ class ModelRegistry:
         *,
         model_name: str = "pattern_mlp",
         interval: str | None = None,
+        horizon: int | None = None,
         asset_class: str | None = None,
     ) -> ModelMetadata:
         candidates = [m for m in self.scan() if m.model_name == model_name or model_name in m.artifact_file]
         if interval:
             candidates = [m for m in candidates if not m.supported_intervals or interval in m.supported_intervals]
+        if horizon:
+            candidates = [m for m in candidates if m.horizon is None or int(m.horizon) == int(horizon)]
         if asset_class:
             candidates = [
                 m
@@ -210,7 +224,7 @@ class ModelRegistry:
             ]
         if not candidates:
             raise ModelArtifactNotFound(
-                f"No model artifact for model={model_name}, interval={interval}, asset_class={asset_class}."
+                f"No model artifact for model={model_name}, interval={interval}, horizon={horizon}, asset_class={asset_class}."
             )
         return candidates[0]
 

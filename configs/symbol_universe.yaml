@@ -1,0 +1,41 @@
+oil_core:
+  - CL=F
+  - BZ=F
+  - NG=F
+  - RB=F
+  - HO=F
+
+commodities:
+  - GC=F
+  - SI=F
+  - HG=F
+
+fx:
+  - DX-Y.NYB
+  - EURUSD=X
+  - USDKRW=X
+  - JPY=X
+
+equity_indices:
+  - SPY
+  - QQQ
+  - ^GSPC
+  - ^VIX
+
+energy_etfs:
+  - XLE
+  - USO
+
+default_global:
+  - CL=F
+  - BZ=F
+  - NG=F
+  - GC=F
+  - SI=F
+  - DX-Y.NYB
+  - EURUSD=X
+  - USDKRW=X
+  - SPY
+  - QQQ
+  - XLE
+  - USO

@@ -10,6 +10,8 @@ data/interim/*
 data/processed/*
 data/features/*
 data/external/*
+!data/external/events/
+!data/external/events/**
 outputs/*
 artifacts/models/*
 *.pyc

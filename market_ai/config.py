@@ -37,8 +37,10 @@ class Settings(BaseModel):
     allow_mock_data: bool = Field(default=False)
     data_stale_threshold_seconds: int = Field(default=86_400)
     enable_llm_context: bool = Field(default=False)
+    enable_external_llm_calls: bool = Field(default=False)
     llm_api_key: str | None = Field(default=None)
     llm_model: str = Field(default="context-encoder-placeholder")
+    llm_api_base: str = Field(default="https://api.openai.com/v1/chat/completions")
     enable_external_features: bool = Field(default=False)
     enable_cross_asset_features: bool = Field(default=False)
     app_version: str = Field(default="0.2.0")
@@ -84,8 +86,10 @@ class Settings(BaseModel):
             allow_mock_data=_parse_bool(source.get("ALLOW_MOCK_DATA"), False),
             data_stale_threshold_seconds=int(source.get("DATA_STALE_THRESHOLD_SECONDS", "86400")),
             enable_llm_context=_parse_bool(source.get("ENABLE_LLM_CONTEXT"), False),
+            enable_external_llm_calls=_parse_bool(source.get("ENABLE_EXTERNAL_LLM_CALLS"), False),
             llm_api_key=source.get("LLM_API_KEY") or None,
             llm_model=source.get("LLM_MODEL", "context-encoder-placeholder"),
+            llm_api_base=source.get("LLM_API_BASE", "https://api.openai.com/v1/chat/completions"),
             enable_external_features=_parse_bool(source.get("ENABLE_EXTERNAL_FEATURES"), False),
             enable_cross_asset_features=_parse_bool(source.get("ENABLE_CROSS_ASSET_FEATURES"), False),
             app_version=source.get("APP_VERSION", "0.2.0"),

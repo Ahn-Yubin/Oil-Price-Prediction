@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +17,7 @@ import yfinance as yf
 
 from market_ai.modeling.forecasters.neural_npz import forecast_with_global_model
 from market_ai.modeling.forecasters.baselines import ForecastContext, BASELINE_FORECASTERS
+from market_ai.modeling.forecasters.deep_fusion import forecast_with_deep_model
 from market_ai.config import PROJECT_DIR
 from market_ai.constants import (
     CONFIDENCE_Z,
@@ -25,16 +25,7 @@ from market_ai.constants import (
     INTERVAL_TO_MAX_LOG_BAND,
     INTERVAL_TO_RETURN_CLIP,
 )
-
-try:
-    import torch
-    import torch.nn as nn
-    from torch.utils.data import DataLoader, TensorDataset
-except Exception:  # pragma: no cover - optional runtime dependency
-    torch = None
-    nn = None
-    DataLoader = None
-    TensorDataset = None
+from market_ai.modeling.model_catalog import REMOVED_LEGACY_MODELS
 
 
 OUT_DIR = PROJECT_DIR / "outputs" / "backtests"
@@ -47,7 +38,6 @@ BACKTEST_PERIOD_CANDIDATES = {
     "15m": ["60d", "30d", "14d"],
 }
 WINDOW_BY_INTERVAL = {"1d": 64, "1h": 96, "30m": 120, "15m": 144}
-_TORCH_MODEL_CACHE: dict[tuple[str, str, int], object] = {}
 
 
 @dataclass(frozen=True)
@@ -188,31 +178,11 @@ def forecast_simple_moving_average_path(close: np.ndarray, interval: str, horizo
     )
 
 
-def forecast_cycle(close: np.ndarray, interval: str, horizon: int) -> ForecastResult:
-    returns = _returns(close)
-    if len(returns) < 24:
-        return ForecastResult("cycle", np.zeros(horizon, dtype=np.float64))
-    lookback = min(len(returns), max(48, horizon))
-    hist = returns[-lookback:]
-    vol = _recent_vol(returns, lookback)
-    demeaned = hist - float(np.mean(hist))
-    spectrum = np.fft.rfft(demeaned)
-    if len(spectrum) <= 2:
-        return ForecastResult("cycle", np.zeros(horizon, dtype=np.float64))
-    idx = int(np.argmax(np.abs(spectrum[1:])) + 1)
-    amp = min(float(np.abs(spectrum[idx]) / len(hist)) * 2.0, vol * 1.25)
-    phase = float(np.angle(spectrum[idx]))
-    t = np.arange(len(hist), len(hist) + horizon, dtype=np.float64)
-    step = float(np.mean(hist)) + amp * np.cos(2.0 * np.pi * idx * t / len(hist) + phase)
-    path = np.cumsum(step)
-    return ForecastResult("cycle", calibrate_amplitude(path, returns, interval, horizon))
-
-
 def forecast_motif(close: np.ndarray, interval: str, horizon: int, k: int = 12) -> ForecastResult:
     returns = _returns(close)
     window = {"1d": 64, "1h": 96, "30m": 120, "15m": 144}.get(interval, 96)
     if len(returns) < window + horizon + 10:
-        return forecast_cycle(close, interval, horizon)
+        return forecast_random_walk(close, interval, horizon)
 
     current = _window_signature(returns[-window:])
     recent_vol = _recent_vol(returns, window)
@@ -230,7 +200,7 @@ def forecast_motif(close: np.ndarray, interval: str, horizon: int, k: int = 12) 
         candidates.append((dist, path))
 
     if not candidates:
-        return forecast_cycle(close, interval, horizon)
+        return forecast_random_walk(close, interval, horizon)
 
     candidates.sort(key=lambda item: item[0])
     top = candidates[: min(k, len(candidates))]
@@ -255,165 +225,29 @@ def forecast_mlp(close: np.ndarray, interval: str, horizon: int) -> ForecastResu
     return ForecastResult("pattern_mlp", np.log(np.asarray(mean, dtype=np.float64) / base))
 
 
-if nn is not None:
-
-    class LSTMPathModel(nn.Module):
-        def __init__(self, in_dim: int, hidden: int, horizon: int):
-            super().__init__()
-            self.lstm = nn.LSTM(in_dim, hidden, batch_first=True, num_layers=1)
-            self.head = nn.Sequential(
-                nn.LayerNorm(hidden),
-                nn.Linear(hidden, hidden),
-                nn.GELU(),
-                nn.Linear(hidden, horizon),
-            )
-
-        def forward(self, x):
-            out, _ = self.lstm(x)
-            return self.head(out[:, -1, :])
+def forecast_deep_lstm_tcn_fusion(close: np.ndarray, interval: str, horizon: int) -> ForecastResult:
+    model = forecast_with_deep_model(model_name="deep_lstm_tcn_fusion", close=close, interval=interval, horizon=horizon)
+    base = float(close[-1])
+    return ForecastResult("deep_lstm_tcn_fusion", np.log(np.asarray(model["values"], dtype=np.float64) / base))
 
 
-    class TCNPathModel(nn.Module):
-        def __init__(self, in_dim: int, hidden: int, horizon: int):
-            super().__init__()
-            self.net = nn.Sequential(
-                nn.Conv1d(in_dim, hidden, kernel_size=5, padding=2),
-                nn.GELU(),
-                nn.Conv1d(hidden, hidden, kernel_size=9, padding=4),
-                nn.GELU(),
-                nn.Conv1d(hidden, hidden, kernel_size=13, padding=6),
-                nn.GELU(),
-            )
-            self.head = nn.Sequential(
-                nn.LayerNorm(hidden),
-                nn.Linear(hidden, hidden),
-                nn.GELU(),
-                nn.Linear(hidden, horizon),
-            )
-
-        def forward(self, x):
-            y = self.net(x.transpose(1, 2)).mean(dim=-1)
-            return self.head(y)
-
-
-def _build_torch_dataset(
-    returns: np.ndarray,
-    interval: str,
-    horizon: int,
-    max_train_samples: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    window = WINDOW_BY_INTERVAL.get(interval, 96)
-    xs: list[np.ndarray] = []
-    ys: list[np.ndarray] = []
-    scales: list[float] = []
-    for t in range(window, len(returns) - horizon + 1):
-        hist = returns[t - window : t]
-        fut = returns[t : t + horizon]
-        scale = max(_recent_vol(hist, window), 1e-5)
-        xs.append(_sequence_features(hist))
-        ys.append(np.clip(np.cumsum(fut) / scale, -12.0, 12.0).astype(np.float32))
-        scales.append(float(scale))
-
-    if not xs:
-        raise RuntimeError("Not enough samples for torch sequence model")
-    X = np.stack(xs).astype(np.float32)
-    Y = np.stack(ys).astype(np.float32)
-    S = np.asarray(scales, dtype=np.float32)
-    if len(X) > max_train_samples:
-        rng = np.random.default_rng(42)
-        idx = np.sort(rng.choice(len(X), size=max_train_samples, replace=False))
-        X, Y, S = X[idx], Y[idx], S[idx]
-    return X, Y, S
-
-
-def _train_torch_path_model(
-    close: np.ndarray,
-    interval: str,
-    horizon: int,
-    kind: str,
-    epochs: int,
-    max_train_samples: int,
-) -> np.ndarray:
-    if torch is None or nn is None:
-        raise RuntimeError("PyTorch is not installed")
-
-    random.seed(42)
-    np.random.seed(42)
-    torch.manual_seed(42)
-    torch.set_num_threads(1)
-
-    returns = _returns(close)
-    cache_key = (kind, interval, horizon)
-    model = _TORCH_MODEL_CACHE.get(cache_key)
-    if model is None:
-        X, Y, _S = _build_torch_dataset(returns, interval, horizon, max_train_samples)
-        x_tensor = torch.tensor(X, dtype=torch.float32)
-        y_tensor = torch.tensor(Y, dtype=torch.float32)
-        dataset = TensorDataset(x_tensor, y_tensor)
-        loader = DataLoader(dataset, batch_size=256, shuffle=True)
-
-        hidden = 24 if kind == "lstm" else 32
-        model = LSTMPathModel(X.shape[-1], hidden, horizon) if kind == "lstm" else TCNPathModel(X.shape[-1], hidden, horizon)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=2.5e-3, weight_decay=1e-4)
-        weights = torch.tensor(1.0 / np.sqrt(np.arange(1, horizon + 1, dtype=np.float32)), dtype=torch.float32)
-        weights = weights / weights.mean()
-
-        model.train()
-        for _epoch in range(epochs):
-            for xb, yb in loader:
-                optimizer.zero_grad(set_to_none=True)
-                pred = model(xb)
-                loss = (((pred - yb) ** 2) * weights).mean()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-        _TORCH_MODEL_CACHE[cache_key] = model
-
-    window = WINDOW_BY_INTERVAL.get(interval, 96)
-    features = _sequence_features(returns[-window:])
-    recent_scale = max(_recent_vol(returns, window), 1e-5)
-    model.eval()
-    with torch.no_grad():
-        pred_scaled = model(torch.tensor(features[None, :, :], dtype=torch.float32)).cpu().numpy()[0]
-    path = pred_scaled.astype(np.float64) * recent_scale
-    path = calibrate_amplitude(path, returns, interval, horizon)
-    return path
-
-
-def forecast_lstm(close: np.ndarray, interval: str, horizon: int) -> ForecastResult:
-    epochs = {"1d": 8, "1h": 6, "30m": 6, "15m": 5}.get(interval, 6)
-    max_samples = {"1d": 1000, "1h": 1200, "30m": 1000, "15m": 1000}.get(interval, 1000)
-    return ForecastResult("lstm", _train_torch_path_model(close, interval, horizon, "lstm", epochs, max_samples))
-
-
-def forecast_tcn(close: np.ndarray, interval: str, horizon: int) -> ForecastResult:
-    epochs = {"1d": 8, "1h": 6, "30m": 6, "15m": 5}.get(interval, 6)
-    max_samples = {"1d": 1000, "1h": 1200, "30m": 1000, "15m": 1000}.get(interval, 1000)
-    return ForecastResult("tcn", _train_torch_path_model(close, interval, horizon, "tcn", epochs, max_samples))
-
-
-def forecast_ensemble(close: np.ndarray, interval: str, horizon: int) -> ForecastResult:
-    motif = forecast_motif(close, interval, horizon).cum_log_path
-    cycle = forecast_cycle(close, interval, horizon).cum_log_path
-    mlp = forecast_mlp(close, interval, horizon).cum_log_path
-    path = 0.60 * motif + 0.20 * cycle + 0.20 * mlp
-    path = calibrate_amplitude(path, _returns(close), interval, horizon)
-    return ForecastResult("ensemble", path)
+def forecast_llm_context_seq_moe(close: np.ndarray, interval: str, horizon: int) -> ForecastResult:
+    model = forecast_with_deep_model(model_name="llm_context_seq_moe", close=close, interval=interval, horizon=horizon)
+    base = float(close[-1])
+    return ForecastResult("llm_context_seq_moe", np.log(np.asarray(model["values"], dtype=np.float64) / base))
 
 
 FORECASTERS = {
     "random_walk": forecast_random_walk,
-    "flat": forecast_flat,
     "drift": forecast_drift,
     "seasonal_naive": forecast_seasonal_naive,
     "volatility_scaled_naive": forecast_volatility_scaled_naive,
+    "flat": forecast_flat,
     "simple_moving_average_path": forecast_simple_moving_average_path,
-    "cycle": forecast_cycle,
     "motif": forecast_motif,
     "pattern_mlp": forecast_mlp,
-    "lstm": forecast_lstm,
-    "tcn": forecast_tcn,
-    "ensemble": forecast_ensemble,
+    "deep_lstm_tcn_fusion": forecast_deep_lstm_tcn_fusion,
+    "llm_context_seq_moe": forecast_llm_context_seq_moe,
 }
 
 
@@ -629,6 +463,12 @@ def run_rolling_backtest(
     include_regime_breakdown: bool,
 ) -> dict[str, pd.DataFrame]:
     close = _clean_close(close)
+    removed = [name for name in model_names if name in REMOVED_LEGACY_MODELS]
+    if removed:
+        raise ValueError(f"Removed/deprecated model(s) requested: {removed}")
+    unknown = [name for name in model_names if name not in FORECASTERS]
+    if unknown:
+        raise ValueError(f"Unknown model(s) requested: {unknown}")
     origins = rolling_origin_indices(
         len(close),
         horizon,
@@ -758,6 +598,20 @@ def run_rolling_backtest(
         if include_regime_breakdown and not ok_summary.empty
         else pd.DataFrame()
     )
+    availability_rows: list[dict] = []
+    for name in model_names:
+        model_rows = summary_source[summary_source["model"] == name] if "model" in summary_source.columns else pd.DataFrame()
+        errors = model_rows["error"].dropna().astype(str).tolist() if "error" in model_rows.columns else []
+        ok_count = len(model_rows) - len(errors)
+        availability_rows.append(
+            {
+                "model": name,
+                "status": "available" if ok_count > 0 else "unavailable",
+                "origins_ok": ok_count,
+                "origins_error": len(errors),
+                "last_error": errors[-1] if errors else None,
+            }
+        )
     leaderboard = summary.copy()
     if not leaderboard.empty and not probabilistic.empty:
         leaderboard = leaderboard.merge(probabilistic[["model", "pinball_loss", "coverage_80", "winkler_80"]], on="model", how="left")
@@ -773,13 +627,14 @@ def run_rolling_backtest(
         "leaderboard": leaderboard,
         "sample": pd.DataFrame(sample_rows),
         "origin_metrics": summary_source,
+        "model_availability": pd.DataFrame(availability_rows),
     }
 
 
 def write_backtest_outputs(outputs: dict[str, pd.DataFrame], output_dir: Path, prefix: str) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    for name in ["summary", "details", "horizon_metrics", "probabilistic_metrics", "regime_metrics", "leaderboard"]:
+    for name in ["summary", "details", "horizon_metrics", "probabilistic_metrics", "regime_metrics", "leaderboard", "model_availability"]:
         path = output_dir / f"{prefix}_{name}.csv"
         outputs.get(name, pd.DataFrame()).to_csv(path, index=False)
         written.append(path)
@@ -846,7 +701,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stride", type=int, default=0, help="Backward-compatible alias for --step")
     p.add_argument(
         "--models",
-        default="motif,lstm,tcn,cycle,pattern_mlp,ensemble,flat,drift,random_walk,seasonal_naive",
+        default="random_walk,drift,seasonal_naive,volatility_scaled_naive,flat,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe",
         help="Comma-separated model list. Available: " + ",".join(FORECASTERS.keys()),
     )
     return p.parse_args()
@@ -860,6 +715,12 @@ def main() -> None:
     plot_dir.mkdir(parents=True, exist_ok=True)
     intervals = [args.interval] if args.interval else ["1d", "1h", "30m", "15m"]
     model_names = [m.strip() for m in args.models.split(",") if m.strip()]
+    removed = [m for m in model_names if m in REMOVED_LEGACY_MODELS]
+    if removed:
+        raise SystemExit(
+            f"Removed/deprecated model(s): {removed}. "
+            f"Supported backtest models: {sorted(FORECASTERS)}"
+        )
     unknown = [m for m in model_names if m not in FORECASTERS]
     if unknown:
         raise SystemExit(f"Unknown model(s): {unknown}. Available: {sorted(FORECASTERS)}")

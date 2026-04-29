@@ -49,3 +49,30 @@ def test_registry_resolve_and_missing(tmp_path: Path):
     assert resolved.artifact_file == path.name
     with pytest.raises(ModelArtifactNotFound):
         registry.resolve(model_name="missing", interval="1d")
+
+
+def test_registry_scans_deep_pt_artifacts(tmp_path: Path):
+    model_dir = tmp_path / "models"
+    metadata_dir = tmp_path / "metadata"
+    model_dir.mkdir()
+    metadata_dir.mkdir()
+    path = model_dir / "deep_lstm_tcn_fusion_1d_h45.pt"
+    path.write_bytes(b"placeholder")
+    (metadata_dir / "deep_lstm_tcn_fusion_1d_h45.json").write_text(
+        json.dumps(
+            {
+                "model_name": "deep_lstm_tcn_fusion",
+                "model_type": "deep_sequence",
+                "version": "test",
+                "artifact_file": path.name,
+                "supported_intervals": ["1d"],
+                "supported_asset_classes": ["futures"],
+                "horizon": 45,
+                "status": "available",
+            }
+        ),
+        encoding="utf-8",
+    )
+    registry = ModelRegistry(Settings(model_dir=model_dir, metadata_dir=metadata_dir))
+    resolved = registry.resolve(model_name="deep_lstm_tcn_fusion", interval="1d")
+    assert resolved.artifact_file == path.name

@@ -216,3 +216,12 @@ class ForecastResponse(BaseModel):
     models: list[ModelInfo] = Field(default_factory=list)
     cross_asset_context: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
+    model_paths: list[dict[str, Any]] = Field(default_factory=list)
+    selected_models: list[str] = Field(default_factory=list)
+    primary_model: str | None = None
+    deprecated_models_requested: list[str] = Field(default_factory=list)
+    removed_models_requested: list[str] = Field(default_factory=list)
+    llm_context_summary: dict[str, Any] = Field(default_factory=dict)
+    deep_model_info: dict[str, Any] = Field(default_factory=dict)
+    feature_version: str | None = None
+    artifact_status: dict[str, str] = Field(default_factory=dict)

@@ -47,6 +47,18 @@
           <option value="30m">30M</option>
           <option value="15m">15M</option>
         </select>
+        <label for="model-input">Model</label>
+        <select id="model-input">
+          <option value="" selected>Default</option>
+          <option value="deep_lstm_tcn_fusion">Deep LSTM+TCN</option>
+          <option value="llm_context_seq_moe">LLM Context MoE</option>
+          <option value="motif">Motif</option>
+          <option value="pattern_mlp">Pattern MLP</option>
+          <option value="random_walk">Random Walk</option>
+          <option value="drift">Drift</option>
+          <option value="seasonal_naive">Seasonal Naive</option>
+          <option value="volatility_scaled_naive">Vol-Scaled Naive</option>
+        </select>
         <label for="scenario-input">Scenario</label>
         <select id="scenario-input">
           <option value="base" selected>Base</option>

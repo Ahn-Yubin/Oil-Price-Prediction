@@ -1,0 +1,4 @@
+timestamp,symbol,event_type,directional_bias,impact_strength,uncertainty,source_quality_score,summary,source
+2025-01-03T13:30:00Z,CL=F,energy_supply,bullish,0.55,0.35,0.8,OPEC supply discipline headline,sample
+2025-01-08T15:00:00Z,ALL,macro_policy,mixed,0.35,0.55,0.7,Federal Reserve minutes affected risk appetite,sample
+2025-01-14T08:00:00Z,BZ=F,geopolitical,bullish,0.65,0.60,0.65,Shipping route disruption risk increased,sample

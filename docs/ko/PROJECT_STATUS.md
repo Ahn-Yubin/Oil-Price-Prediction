@@ -6,7 +6,17 @@
 
 현재 프로젝트는 유가 전용 dashboard에서 범용 시장 예측 플랫폼으로 재구성된 상태입니다. FastAPI backend, `market_ai` 도메인 로직, Vite frontend, CLI scripts, model artifacts가 분리되어 있으며, 차트는 yfinance 시장 데이터와 가격 시계열 모델이 만든 forecast quantile path를 TradingView Lightweight Charts 스타일로 표시합니다.
 
-LLM은 현재 숫자 예측에 사용되지 않습니다. `/api/explanation`에서 설명과 structured event context를 만들기 위한 인터페이스만 준비되어 있고, 기본 설정에서는 deterministic explanation으로 동작합니다.
+LLM은 숫자 예측에 사용되지 않습니다. `LocalEventContextEncoder`와 optional OpenAI-compatible adapter는 structured context와 설명만 만들며, 외부 호출은 `ENABLE_EXTERNAL_LLM_CALLS=true`일 때만 허용됩니다.
+
+2026-04-30 기준 모델 정리 결과:
+
+- Classical: `motif`
+- Deep learning: `pattern_mlp`, `deep_lstm_tcn_fusion`, `llm_context_seq_moe`
+- Baselines: `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive`
+- Backtest-only: `flat`, `simple_moving_average_path`, optional `regime_ensemble`
+- Removed/deprecated: `cycle`, `lstm`, `tcn`, `ensemble`
+
+`/api/forecast`의 `models` query는 실제 선택에 반영됩니다. Removed model은 forecast API에서 400을 반환하고, `/api/chart` compatibility path에서는 warning과 fallback을 사용할 수 있습니다.
 
 ## 폴더별 역할
 
@@ -195,4 +205,3 @@ Frontend 관점에서는 `/api/forecast`가 성공하면 p50, p10, p90, p05, p95
 5. `docs/ko/BACKTESTING.md`
 6. `docs/ko/LLM_CONTEXT.md`
 7. `docs/ko/OPERATIONS.md`
-

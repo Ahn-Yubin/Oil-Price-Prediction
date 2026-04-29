@@ -11,7 +11,9 @@ New teammates should start with [Project Status](docs/en/PROJECT_STATUS.md). It 
 ```bash
 uvicorn backend.app.main:app --reload --port 8000
 python scripts/train/train_pretrained_models.py --interval 1d
-python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 5 --models random_walk,drift,flat --no-plots
+python scripts/train/train_deep_fusion_models.py --model both --interval 1d --universe oil_core --epochs 10 --batch-size 64
+python scripts/train/train_deep_fusion_models.py --model deep_lstm_tcn_fusion --interval 1d --quick-test --epochs 1 --max-samples 256
+python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
 python scripts/maintenance/check_docs_i18n.py
 python scripts/maintenance/smoke_test_api.py
 ```
@@ -27,6 +29,8 @@ If `python` is not available in the local shell, use `.venv/bin/python`.
 - `DATA_DIR`: runtime data location. Default: `data`.
 - `DEFAULT_SYMBOL`, `DEFAULT_INTERVAL`: default symbol and interval.
 - `ENABLE_LLM_CONTEXT`, `LLM_API_KEY`, `LLM_MODEL`: LLM context encoder settings.
+- `ENABLE_EXTERNAL_LLM_CALLS`: allows external LLM calls. Default is `false`.
+- `NEWS_EVENTS_PATH`, `ECONOMIC_EVENTS_PATH`, `MARKET_EVENTS_PATH`: deterministic event context file paths.
 
 ## API
 
@@ -47,14 +51,24 @@ Primary endpoints:
 
 Numeric forecasts are produced by time-series models and baselines, not by an LLM. The forecast target remains a volatility-scaled cumulative log return distribution, and forecast prices are reconstructed as `current_price * exp(cumulative_log_return_h)`.
 
-`.npz` model weights live in `artifacts/models`, and metadata JSON lives in `artifacts/metadata`. Source code and artifacts stay separate.
+Final model classification:
+
+- Classical: `motif`
+- Deep learning: `pattern_mlp`, `deep_lstm_tcn_fusion`, `llm_context_seq_moe`
+- Baselines: `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive`
+- Backtest-only: `flat`, `simple_moving_average_path`, optional `regime_ensemble`
+- Removed/deprecated: `cycle`, `lstm`, `tcn`, `ensemble`
+
+The standalone `cycle` model was removed and its signal is now a feature. The old live LSTM/TCN paths were replaced by artifact-based encoders inside `deep_lstm_tcn_fusion`. The fixed ensemble is replaced by `llm_context_seq_moe`, where LLM/event context affects gating and uncertainty but cannot create numeric paths directly.
+
+`.npz` and `.pt` model weights live in `artifacts/models`, and metadata JSON lives in `artifacts/metadata`. Source code and artifacts stay separate. If an artifact is missing, the API returns a warning plus `artifact_status` and falls back to an available model.
 
 ## Backtesting
 
 The backtest CLI is `scripts/backtest/run_backtest.py`. Reusable logic lives in `market_ai/backtesting`.
 
 ```bash
-python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 5 --models random_walk,drift,flat --no-plots
+python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
 ```
 
 ## LLM Context Encoder

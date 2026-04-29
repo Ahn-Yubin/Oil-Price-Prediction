@@ -43,16 +43,17 @@ function closeSymbolDropdown() {
   document.getElementById("symbol-input")?.setAttribute("aria-expanded", "false");
 }
 
-async function loadData(symbol, interval) {
+async function loadData(symbol, interval, models = "") {
   const ts = Date.now();
-  const forecastUrl = `/api/forecast?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&_ts=${ts}`;
+  const modelQuery = models ? `&models=${encodeURIComponent(models)}` : "";
+  const forecastUrl = `/api/forecast?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}${modelQuery}&_ts=${ts}`;
   let response = await fetch(forecastUrl, { cache: "no-store" });
   if (response.ok) {
     const forecast = await response.json();
     return convertForecastToChartPayload(forecast);
   }
   response = await fetch(
-    `/api/chart?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&_ts=${ts}`,
+    `/api/chart?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}${modelQuery}&_ts=${ts}`,
     { cache: "no-store" },
   );
   if (!response.ok) {
@@ -100,7 +101,7 @@ function convertForecastToChartPayload(forecast) {
     predicted_upper: lineFrom("p90"),
     predicted_tail_lower: lineFrom("p05"),
     predicted_tail_upper: lineFrom("p95"),
-    forecast_models: scenarioModels,
+    forecast_models: forecast.model_paths?.length ? forecast.model_paths : scenarioModels,
     metrics: {
       mae: null,
       rmse: null,
@@ -121,6 +122,10 @@ function convertForecastToChartPayload(forecast) {
     asset_metadata: forecast.asset_metadata,
     regime: forecast.regime,
     cross_asset_context: forecast.cross_asset_context,
+    selected_models: forecast.selected_models || [],
+    primary_model: forecast.primary_model || null,
+    artifact_status: forecast.artifact_status || {},
+    llm_context_summary: forecast.llm_context_summary || {},
     explanation_hint: "Use /api/explanation for structured context.",
   };
 }
@@ -163,6 +168,11 @@ function setForecastBadges(payload) {
     const entries = Object.entries(probs).filter(([key]) => key !== "confidence");
     const label = entries.length ? entries.sort((a, b) => Number(b[1]) - Number(a[1]))[0][0] : "unknown";
     regime.textContent = `REGIME ${String(label).replaceAll("_", " ").toUpperCase()}`;
+  }
+  const modelValue = document.getElementById("model-value");
+  if (modelValue && payload.primary_model) {
+    const llm = payload.llm_context_summary?.enabled ? "LLM context on" : "LLM context off";
+    modelValue.textContent = `${payload.primary_model} (${llm})`;
   }
 }
 
@@ -223,7 +233,7 @@ function formatPrice(value) {
 
 function primaryForecastModel(payload) {
   const models = payload?.forecast_models || [];
-  return models.find((model) => model.id === "motif") || models[0] || null;
+  return models.find((model) => model.id === payload?.primary_model) || models.find((model) => model.id === "motif") || models[0] || null;
 }
 
 function setLegendRows(rows) {
@@ -602,9 +612,11 @@ function renderChart(payload, resetView = false) {
 async function initDashboard(symbol, interval) {
   const reqId = ++requestVersion;
   const loadBtn = document.getElementById("load-button");
+  const modelInput = document.getElementById("model-input");
+  const selectedModels = modelInput ? modelInput.value || "" : "";
   if (loadBtn) loadBtn.disabled = true;
   try {
-    const payload = await loadData(symbol, interval);
+    const payload = await loadData(symbol, interval, selectedModels);
     if (reqId !== requestVersion) return;
     setMetrics(
       payload.metrics,
@@ -644,6 +656,7 @@ function bindControls() {
   const combobox = document.getElementById("symbol-combobox");
   const dropdown = document.getElementById("symbol-dropdown");
   const intervalInput = document.getElementById("interval-input");
+  const modelInput = document.getElementById("model-input");
   const button = document.getElementById("load-button");
   const triggerSearch = () => {
     const symbol = (input.value || "NYMEX:CL1!").trim();
@@ -694,6 +707,7 @@ function bindControls() {
     }
   });
   intervalInput.addEventListener("change", triggerSearch);
+  modelInput?.addEventListener("change", triggerSearch);
   updateSymbolSuggestionState();
 }
 

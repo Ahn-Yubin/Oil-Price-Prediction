@@ -11,7 +11,9 @@
 ```bash
 uvicorn backend.app.main:app --reload --port 8000
 python scripts/train/train_pretrained_models.py --interval 1d
-python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 5 --models random_walk,drift,flat --no-plots
+python scripts/train/train_deep_fusion_models.py --model both --interval 1d --universe oil_core --epochs 10 --batch-size 64
+python scripts/train/train_deep_fusion_models.py --model deep_lstm_tcn_fusion --interval 1d --quick-test --epochs 1 --max-samples 256
+python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
 python scripts/maintenance/check_docs_i18n.py
 python scripts/maintenance/smoke_test_api.py
 ```
@@ -27,6 +29,8 @@ python scripts/maintenance/smoke_test_api.py
 - `DATA_DIR`: runtime data 위치입니다. 기본값은 `data`입니다.
 - `DEFAULT_SYMBOL`, `DEFAULT_INTERVAL`: 기본 symbol과 interval입니다.
 - `ENABLE_LLM_CONTEXT`, `LLM_API_KEY`, `LLM_MODEL`: LLM context encoder 설정입니다.
+- `ENABLE_EXTERNAL_LLM_CALLS`: 외부 LLM 호출 허용 여부입니다. 기본값은 `false`입니다.
+- `NEWS_EVENTS_PATH`, `ECONOMIC_EVENTS_PATH`, `MARKET_EVENTS_PATH`: deterministic event context 파일 경로입니다.
 
 ## API
 
@@ -47,14 +51,24 @@ python scripts/maintenance/smoke_test_api.py
 
 숫자 예측은 LLM이 아니라 시계열 모델과 baseline이 담당합니다. Forecast target은 volatility-scaled cumulative log return distribution 구조를 유지하며, 예측 가격은 `current_price * exp(cumulative_log_return_h)`로 복원합니다.
 
-`.npz` 모델 가중치는 `artifacts/models`에 두고, metadata JSON은 `artifacts/metadata`에 둡니다. Source code와 artifact를 섞지 않습니다.
+최종 모델 분류는 다음과 같습니다.
+
+- Classical: `motif`
+- Deep learning: `pattern_mlp`, `deep_lstm_tcn_fusion`, `llm_context_seq_moe`
+- Baselines: `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive`
+- Backtest-only: `flat`, `simple_moving_average_path`, optional `regime_ensemble`
+- Removed/deprecated: `cycle`, `lstm`, `tcn`, `ensemble`
+
+`cycle` standalone 모델은 제거하고 cycle 정보는 feature로 사용합니다. 기존 live LSTM/TCN은 artifact 기반 `deep_lstm_tcn_fusion` encoder로 대체했습니다. Fixed ensemble은 LLM/event context가 gating에만 영향을 주는 `llm_context_seq_moe`로 대체합니다.
+
+`.npz`와 `.pt` 모델 가중치는 `artifacts/models`에 두고, metadata JSON은 `artifacts/metadata`에 둡니다. Source code와 artifact를 섞지 않습니다. Artifact가 없으면 API는 warning과 `artifact_status`를 반환하고 가능한 fallback 모델을 사용합니다.
 
 ## 백테스트
 
 Backtest CLI는 `scripts/backtest/run_backtest.py`입니다. 재사용 가능한 로직은 `market_ai/backtesting`에 있습니다.
 
 ```bash
-python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 5 --models random_walk,drift,flat --no-plots
+python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
 ```
 
 ## LLM Context Encoder

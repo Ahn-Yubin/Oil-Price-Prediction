@@ -1,0 +1,45 @@
+{
+  "model_name": "deep_lstm_tcn_fusion",
+  "model_type": "deep_sequence",
+  "version": "deep_v1",
+  "artifact_file": "deep_lstm_tcn_fusion_1d_h8.pt",
+  "created_at": "2026-04-29T19:55:06.977841+00:00",
+  "training_cutoff": "2020-09-08T00:00:00+00:00",
+  "asset_universe": [
+    "CL=F",
+    "BZ=F",
+    "NG=F",
+    "RB=F",
+    "HO=F"
+  ],
+  "supported_asset_classes": [
+    "unknown"
+  ],
+  "supported_intervals": [
+    "1d"
+  ],
+  "lookback": 32,
+  "horizon": 8,
+  "target": "volatility_scaled_cumulative_log_return_distribution",
+  "feature_set": "deep_price_v1",
+  "scaler": "recent_realized_volatility",
+  "metrics": {
+    "train_loss": 2.87343168258667,
+    "validation_loss": 1.6408838033676147,
+    "epochs_ran": 1,
+    "n_train": 90,
+    "n_val": 19,
+    "n_test": 19
+  },
+  "notes": null,
+  "status": "available",
+  "deep_config": {
+    "price_feature_dim": 23,
+    "cross_asset_dim": 6,
+    "event_context_dim": 13,
+    "static_dim": 4,
+    "horizon": 8,
+    "hidden_dim": 48,
+    "dropout": 0.1
+  }
+}

@@ -17,9 +17,10 @@ from market_ai.constants import (
     INTERVAL_TO_RETURN_CLIP,
 )
 from market_ai.modeling.forecasters.baselines import BASELINE_FORECASTERS, ForecastContext
-from market_ai.modeling.regimes.moe import regime_ensemble_forecast
+from market_ai.modeling.forecasters.deep_fusion import DeepModelUnavailable, forecast_with_deep_model
 from market_ai.modeling.forecasters.neural_npz import PretrainedModelNotFoundError
 from market_ai.modeling.forecasters.motif import forecast_model_comparison
+from market_ai.modeling.model_catalog import DEEP_MODELS, USER_FACING_MODELS, InvalidModelRequest, resolve_model_selection
 from market_ai.schemas.market import (
     DataStatusKind,
     ForecastPoint,
@@ -202,18 +203,18 @@ def _baseline_comparison_models(close: np.ndarray, interval: str, horizon: int) 
     context = ForecastContext(close=close, interval=interval, horizon=horizon, current_price=float(close[-1]))
     colors = {
         "random_walk": "#8b949e",
+        "drift": "#ff7b72",
         "seasonal_naive": "#f2cc60",
         "volatility_scaled_naive": "#db6d28",
-        "simple_moving_average_path": "#2dd4bf",
     }
     labels = {
         "random_walk": "Random Walk",
+        "drift": "Drift",
         "seasonal_naive": "Seasonal Naive",
         "volatility_scaled_naive": "Vol-Scaled Naive",
-        "simple_moving_average_path": "SMA Path",
     }
     out: list[dict[str, Any]] = []
-    for name in ["random_walk", "seasonal_naive", "volatility_scaled_naive", "simple_moving_average_path"]:
+    for name in ["random_walk", "drift", "seasonal_naive", "volatility_scaled_naive"]:
         result = BASELINE_FORECASTERS[name](context)
         prices = context.current_price * np.exp(result.cum_log_path)
         out.append(
@@ -223,19 +224,104 @@ def _baseline_comparison_models(close: np.ndarray, interval: str, horizon: int) 
                 "description": result.metadata.get("description") or "Baseline forecast",
                 "color": colors[name],
                 "values": np.asarray(prices, dtype=np.float64),
+                "quantile_prices": result.price_quantiles(context.current_price),
+                "prob_up": result.prob_up,
+                "expected_volatility": result.expected_volatility,
+                "confidence": result.confidence,
             }
         )
-    moe = regime_ensemble_forecast(context)
-    out.append(
-        {
-            "id": "regime_ensemble",
-            "label": "Regime Ensemble",
-            "description": f"Regime-aware MoE baseline ({moe.metadata.get('regime', 'unknown')})",
-            "color": "#7ee787",
-            "values": np.asarray(context.current_price * np.exp(moe.cum_log_path), dtype=np.float64),
-        }
-    )
     return out
+
+
+def _candle_frame_from_market(market: MarketDataWindow) -> pd.DataFrame:
+    return pd.DataFrame([candle.model_dump() for candle in market.candles]).assign(
+        date=lambda frame: pd.to_datetime(frame["time"], unit="s", utc=True)
+    )
+
+
+def _deep_comparison_models(
+    *,
+    close: np.ndarray,
+    interval: str,
+    horizon: int,
+    market: MarketDataWindow,
+    selected: list[str],
+    settings: Settings,
+    warnings: list[str],
+    artifact_status: dict[str, str],
+    deep_model_info: dict[str, Any],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    frame = _candle_frame_from_market(market)
+    for model_name in selected:
+        if model_name not in DEEP_MODELS:
+            continue
+        try:
+            model = forecast_with_deep_model(
+                model_name=model_name,
+                close=close,
+                interval=interval,
+                horizon=horizon,
+                settings=settings,
+                symbol=market.symbol.provider_symbol,
+                candles=frame,
+            )
+        except DeepModelUnavailable as exc:
+            artifact_status[model_name] = "missing_or_unavailable"
+            warnings.append(f"{model_name} artifact unavailable; falling back to available non-deep models. Detail: {exc}")
+            continue
+        artifact_status[model_name] = "available"
+        deep_model_info[model_name] = {
+            "artifact_file": model.get("artifact_file"),
+            "metadata": model.get("metadata", {}),
+        }
+        out.append(model)
+    return out
+
+
+def _forecast_points_from_model(
+    *,
+    model: dict[str, Any],
+    current_price: float,
+    future_times: list[datetime],
+    fallback_band: np.ndarray,
+    data_status: DataStatusKind | str,
+) -> list[ForecastPoint]:
+    q_prices = model.get("quantile_prices")
+    if isinstance(q_prices, dict) and {"p05", "p10", "p25", "p50", "p75", "p90", "p95"}.issubset(q_prices):
+        points: list[ForecastPoint] = []
+        prob_up = np.asarray(model.get("prob_up", []), dtype=np.float64)
+        expected_vol = np.asarray(model.get("expected_volatility", []), dtype=np.float64)
+        confidence = np.asarray(model.get("confidence", []), dtype=np.float64).reshape(-1)
+        for idx, dt_value in enumerate(future_times):
+            raw = {key: float(np.asarray(q_prices[key], dtype=np.float64)[idx]) for key in ["p05", "p10", "p25", "p50", "p75", "p90", "p95"]}
+            ordered = sorted(raw.values())
+            p50 = max(ordered[3], 1e-8)
+            mid_log = float(np.log(p50 / current_price))
+            points.append(
+                ForecastPoint(
+                    time=int(pd.Timestamp(dt_value).timestamp()),
+                    p05=ordered[0],
+                    p10=ordered[1],
+                    p25=ordered[2],
+                    p50=ordered[3],
+                    p75=ordered[4],
+                    p90=ordered[5],
+                    p95=ordered[6],
+                    expected_return=mid_log,
+                    expected_volatility=_finite_float(expected_vol[idx] if idx < len(expected_vol) else abs(mid_log), 0.0),
+                    prob_up=_clip01(prob_up[idx] if idx < len(prob_up) else 0.5),
+                    confidence=_clip01(confidence[idx] if idx < len(confidence) else confidence[0] if len(confidence) else 0.55),
+                )
+            )
+        return points
+    return _quantile_points(
+        current_price=current_price,
+        future_times=future_times,
+        p50_prices=np.asarray(model["values"], dtype=np.float64),
+        log_band=fallback_band,
+        data_status=data_status,
+    )
 
 
 def build_forecast(
@@ -246,10 +332,17 @@ def build_forecast(
     models: str | None = None,
     include_explanation: bool = False,
     include_scenarios: bool = True,
+    allow_removed_models_as_warning: bool = False,
     settings: Settings | None = None,
 ) -> ForecastBundle:
-    del models, include_explanation
+    del include_explanation
     settings = settings or get_settings()
+    selection = resolve_model_selection(
+        models,
+        supported=USER_FACING_MODELS,
+        default=USER_FACING_MODELS,
+        allow_removed_as_warning=allow_removed_models_as_warning,
+    )
     try:
         market = load_market_data_window(symbol, interval, settings=settings)
     except MarketDataUnavailable:
@@ -278,9 +371,40 @@ def build_forecast(
 
     if not comparison_models:
         raise ForecastUnavailable("No forecast model output was produced.")
-    comparison_models = comparison_models + _baseline_comparison_models(close, resolved_interval, model_horizon)
+    warnings = list(selection.warnings)
+    artifact_status: dict[str, str] = {}
+    deep_model_info: dict[str, Any] = {}
+    comparison_models = (
+        _deep_comparison_models(
+            close=close,
+            interval=resolved_interval,
+            horizon=output_horizon,
+            market=market,
+            selected=selection.selected,
+            settings=settings,
+            warnings=warnings,
+            artifact_status=artifact_status,
+            deep_model_info=deep_model_info,
+        )
+        + comparison_models
+        + _baseline_comparison_models(close, resolved_interval, model_horizon)
+    )
+    model_by_id: dict[str, dict[str, Any]] = {}
+    for item in comparison_models:
+        model_by_id[str(item.get("id"))] = item
+    comparison_models = [model_by_id[name] for name in selection.selected if name in model_by_id]
+    if not comparison_models:
+        fallback_order = ["motif", "pattern_mlp", "random_walk"]
+        comparison_models = [model_by_id[name] for name in fallback_order if name in model_by_id]
+    if not comparison_models:
+        raise ForecastUnavailable("No selected forecast model output was available.")
 
-    primary = next((item for item in comparison_models if item.get("id") == "motif"), comparison_models[0])
+    primary_priority = (
+        ["deep_lstm_tcn_fusion", "motif", "pattern_mlp", "random_walk"]
+        if not selection.requested
+        else selection.selected
+    )
+    primary = next((model_by_id[name] for name in primary_priority if name in model_by_id and model_by_id[name] in comparison_models), comparison_models[0])
     p50_prices = np.asarray(primary["values"], dtype=np.float64)[:output_horizon]
     band = np.asarray(model_info.get("_ci_band_values", []), dtype=np.float64)[:output_horizon]
     if len(band) < output_horizon:
@@ -297,8 +421,15 @@ def build_forecast(
         log_band=band,
         data_status=market.data_status.status,
     )
+    forecast_points = _forecast_points_from_model(
+        model=primary,
+        current_price=current_price,
+        future_times=future_times,
+        fallback_band=band,
+        data_status=market.data_status.status,
+    )
 
-    warnings = list(market.data_status.warnings)
+    warnings.extend(market.data_status.warnings)
     warnings.append("Quantile bands are residual-volatility adapters and are not validated coverage intervals yet.")
     status_value = str(market.data_status.status)
     if status_value in {DataStatusKind.mock.value, DataStatusKind.fallback.value, DataStatusKind.stale.value}:
@@ -348,6 +479,19 @@ def build_forecast(
         models=logical_infos + registry_infos,
         cross_asset_context=cross_asset_context,
         warnings=warnings,
+        model_paths=forecast_models,
+        selected_models=selection.selected,
+        primary_model=str(primary.get("id")),
+        deprecated_models_requested=selection.deprecated_requested,
+        removed_models_requested=selection.removed_requested,
+        llm_context_summary={
+            "enabled": settings.enable_llm_context,
+            "external_calls_enabled": settings.enable_external_llm_calls,
+            "role": "context/event encoder only",
+        },
+        deep_model_info=deep_model_info,
+        feature_version=model_info.get("feature_version") or model_info.get("feature_set"),
+        artifact_status=artifact_status,
     )
     return ForecastBundle(
         response=response,
@@ -386,6 +530,14 @@ def chart_payload_from_forecast(bundle: ForecastBundle) -> dict[str, Any]:
         "warning": " ".join(response.warnings) if response.warnings else None,
         "warnings": response.warnings,
         "forecast_horizon": bundle.horizon,
+        "selected_models": response.selected_models,
+        "primary_model": response.primary_model,
+        "deprecated_models_requested": response.deprecated_models_requested,
+        "removed_models_requested": response.removed_models_requested,
+        "llm_context_summary": response.llm_context_summary,
+        "deep_model_info": response.deep_model_info,
+        "feature_version": response.feature_version,
+        "artifact_status": response.artifact_status,
         "confidence_level": None,
         "band_label": "uncalibrated residual-volatility quantile adapter",
         "model_trained_at": bundle.model_info.get("trained_at"),

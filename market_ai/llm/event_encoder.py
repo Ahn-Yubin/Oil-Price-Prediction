@@ -1,14 +1,47 @@
 from __future__ import annotations
 
 import json
+import re
+import time
+import urllib.error
+import urllib.request
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
 
+from market_ai.data.event_providers import FileEventProvider
 from market_ai.config import Settings
 from market_ai.schemas.llm_context import ExplanationOutput, LLMContextOutput, MarketContextInput, StructuredEvent
+
+FORBIDDEN_NUMERIC_FORECAST_PATTERNS = (
+    re.compile(r"\btarget[_\s-]?price\b", re.IGNORECASE),
+    re.compile(r"\bp50\b", re.IGNORECASE),
+    re.compile(r"\bp90\b", re.IGNORECASE),
+    re.compile(r"\bfuture[_\s-]?price[_\s-]?path\b", re.IGNORECASE),
+    re.compile(r"\bprice[_\s-]?target\b", re.IGNORECASE),
+    re.compile(r"\breturn[_\s-]?path\b", re.IGNORECASE),
+)
+
+
+def _contains_forbidden_numeric_forecast(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(_contains_forbidden_numeric_forecast(k) or _contains_forbidden_numeric_forecast(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_contains_forbidden_numeric_forecast(item) for item in value)
+    text = str(value)
+    return any(pattern.search(text) for pattern in FORBIDDEN_NUMERIC_FORECAST_PATTERNS)
+
+
+def validate_llm_context_output(output: LLMContextOutput, raw: Any | None = None) -> LLMContextOutput:
+    warnings = list(output.warnings)
+    if raw is not None and _contains_forbidden_numeric_forecast(raw):
+        warnings.append("LLM output contained forbidden numeric forecast fields; numeric fields were ignored.")
+    if _contains_forbidden_numeric_forecast(output.explanation):
+        output = output.model_copy(update={"explanation": "Structured context only; numeric forecast text was removed."})
+        warnings.append("LLM explanation contained forbidden numeric forecast text and was replaced.")
+    return output.model_copy(update={"warnings": warnings})
 
 
 class BaseLLMEventEncoder(ABC):
@@ -54,32 +87,98 @@ class MockLLMEventEncoder(BaseLLMEventEncoder):
         )
 
 
-class OpenAICompatibleLLMEventEncoder(BaseLLMEventEncoder):
-    def __init__(self, api_key: str | None, model: str):
-        self.api_key = api_key
-        self.model = model
+class LocalEventContextEncoder(BaseLLMEventEncoder):
+    def __init__(self, event_provider: FileEventProvider | None = None):
+        self.event_provider = event_provider or FileEventProvider.from_env()
 
     def encode_events(self, context: MarketContextInput) -> LLMContextOutput:
-        if not self.api_key:
-            return NullLLMEventEncoder().encode_events(context)
+        as_of = context.generated_at or datetime.now(timezone.utc)
+        vector = self.event_provider.context_vector(symbol=context.symbol, as_of_time=as_of)
+        events = self.event_provider.events_as_of(symbol=context.symbol, as_of_time=as_of)
+        structured: list[StructuredEvent] = []
+        for event in events[-12:]:
+            structured.append(
+                StructuredEvent(
+                    event_type=event.event_type,
+                    affected_assets=[event.symbol or context.symbol],
+                    directional_bias=event.directional_bias if event.directional_bias in {"bullish", "bearish", "neutral", "mixed", "unknown"} else "unknown",
+                    impact_strength=event.impact_strength,
+                    uncertainty=event.uncertainty,
+                    time_decay=vector.time_decay,
+                    summary=event.summary or event.event_type,
+                    risk_factors=[],
+                )
+            )
+        bias = "neutral"
+        if vector.directional_bias_score > 0.15:
+            bias = "bullish"
+        elif vector.directional_bias_score < -0.15:
+            bias = "bearish"
+        elif vector.event_count_7d > 0:
+            bias = "mixed"
         return LLMContextOutput(
-            events=[],
-            overall_bias="unknown",
-            impact_score=0.0,
-            uncertainty=1.0,
-            event_embedding=[],
-            explanation=(
-                "OpenAI-compatible LLM adapter is configured as an interface placeholder. "
-                "No external call is made in this runtime path."
-            ),
-            warnings=["External LLM calls are not enabled by this adapter implementation."],
+            events=structured,
+            overall_bias=bias,
+            impact_score=min(max(vector.impact_strength, 0.0), 1.0),
+            uncertainty=min(max(vector.uncertainty, 0.0), 1.0),
+            event_embedding=vector.as_list(),
+            explanation="Deterministic local event context encoder produced structured context only.",
+            warnings=[] if structured else ["No point-in-time event records available; using zero context."],
         )
+
+
+class OpenAICompatibleLLMEventEncoder(BaseLLMEventEncoder):
+    def __init__(self, api_key: str | None, model: str, *, enabled: bool = False, api_base: str | None = None, timeout: float = 8.0):
+        self.api_key = api_key
+        self.model = model
+        self.enabled = enabled
+        self.api_base = api_base or "https://api.openai.com/v1/chat/completions"
+        self.timeout = timeout
+
+    def encode_events(self, context: MarketContextInput) -> LLMContextOutput:
+        if not self.enabled or not self.api_key:
+            return LocalEventContextEncoder().encode_events(context)
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a market context/event encoder. Do not output price targets. "
+                        "Do not output p50/p90 price. Do not output direct future return path. "
+                        "Only produce structured context and explanation."
+                    ),
+                },
+                {"role": "user", "content": context.model_dump_json()},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.0,
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                request = urllib.request.Request(
+                    self.api_base,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers=headers,
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    body = json.loads(response.read().decode("utf-8"))
+                content = body["choices"][0]["message"]["content"]
+                return parse_llm_context_json(content)
+            except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = exc
+                time.sleep(0.15 * (attempt + 1))
+        fallback = LocalEventContextEncoder().encode_events(context)
+        return fallback.model_copy(update={"warnings": [*fallback.warnings, f"External LLM fallback: {last_error}"]})
 
 
 def parse_llm_context_json(raw: str) -> LLMContextOutput:
     try:
         data: Any = json.loads(raw)
-        return LLMContextOutput.model_validate(data)
+        return validate_llm_context_output(LLMContextOutput.model_validate(data), raw=data)
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
         return LLMContextOutput(
             explanation="Failed to parse LLM JSON output; using safe fallback context.",
@@ -91,8 +190,13 @@ def encoder_from_settings(settings: Settings) -> BaseLLMEventEncoder:
     if not settings.enable_llm_context:
         return NullLLMEventEncoder()
     if settings.is_development and not settings.llm_api_key:
-        return MockLLMEventEncoder()
-    return OpenAICompatibleLLMEventEncoder(api_key=settings.llm_api_key, model=settings.llm_model)
+        return LocalEventContextEncoder()
+    return OpenAICompatibleLLMEventEncoder(
+        api_key=settings.llm_api_key,
+        model=settings.llm_model,
+        enabled=settings.enable_external_llm_calls,
+        api_base=settings.llm_api_base,
+    )
 
 
 def deterministic_explanation(
