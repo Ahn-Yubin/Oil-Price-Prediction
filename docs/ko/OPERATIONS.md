@@ -27,6 +27,39 @@ python scripts/train/train_deep_fusion_models.py --model deep_lstm_tcn_fusion --
 
 Artifact는 `artifacts/models`, metadata JSON은 `artifacts/metadata`에 저장됩니다.
 
+실전 processed data 학습:
+
+```bash
+python scripts/train/train_deep_fusion_models.py \
+  --model both \
+  --interval 1d \
+  --universe oil_core \
+  --use-processed-data \
+  --market-panel data/processed/market_panel/1d/panel.parquet \
+  --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
+  --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
+  --cme-curve data/processed/oil_fundamentals/cme_curve_daily.csv \
+  --event-context data/processed/event_context/event_context_daily.csv \
+  --epochs 30 \
+  --batch-size 64 \
+  --force
+```
+
+`panel.parquet`이 없고 `panel.csv`만 있으면 loader가 CSV fallback을 읽습니다. Production training은 `--synthetic`, `--quick-test`, `--allow-synthetic-fallback` 없이 synthetic fallback을 사용하지 않습니다.
+
+## 데이터 구축
+
+```bash
+python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
+python scripts/data/fetch_eia_petroleum.py --manual-csv path/to/eia.csv
+python scripts/data/fetch_cftc_cot.py --manual-csv path/to/cftc.csv
+python scripts/data/fetch_cme_settlements.py --manual-csv path/to/cme.csv
+python scripts/data/build_event_context.py --events-path data/external/events/sample_market_events.csv --mode local_rules
+python scripts/data/build_data_inventory.py
+```
+
+API key와 secret은 `.env` 또는 shell 환경변수로만 주입하고 커밋하지 않습니다.
+
 ## 백테스트
 
 ```bash
@@ -34,6 +67,13 @@ python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origin
 ```
 
 Deep artifact가 없으면 해당 모델은 unavailable로 기록되고 전체 backtest는 계속됩니다.
+
+Leaderboard와 calibration:
+
+```bash
+python scripts/evaluate/run_model_leaderboard.py --symbols CL=F,BZ=F,NG=F --interval 1d --max-origins 50
+python scripts/evaluate/calibrate_quantiles.py --model motif --symbol CL=F --interval 1d
+```
 
 ## API와 차트
 

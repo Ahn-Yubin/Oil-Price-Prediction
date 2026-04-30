@@ -18,8 +18,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from market_ai.config import PROJECT_DIR
-from market_ai.data.deep_dataset import build_deep_dataset_from_frame, build_synthetic_deep_dataset
+from market_ai.data.deep_dataset import DeepDataset, _time_split_indices, build_deep_dataset_from_frame, build_synthetic_deep_dataset, combine_auxiliary_feature_frames
 from market_ai.data.event_providers import EVENT_FILE_ENV_VARS, FileEventProvider
+from market_ai.data.market_panel import load_market_panel
+from market_ai.data.storage import read_table
 from market_ai.data.symbol_universe import load_symbol_universe
 from market_ai.modeling.deep.artifacts import deep_artifact_name, deep_metadata_name, save_deep_artifact, write_deep_metadata
 from market_ai.modeling.deep.training import train_deep_model
@@ -44,6 +46,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-context", dest="llm_context", action="store_true", default=True)
     parser.add_argument("--no-llm-context", dest="llm_context", action="store_false")
     parser.add_argument("--events-path", default="")
+    parser.add_argument("--use-processed-data", action="store_true")
+    parser.add_argument("--market-panel", default="")
+    parser.add_argument("--oil-fundamentals", default="")
+    parser.add_argument("--cot", default="")
+    parser.add_argument("--cme-curve", default="")
+    parser.add_argument("--event-context", default="")
     parser.add_argument("--max-samples", type=int, default=512)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -133,6 +141,55 @@ def build_dataset(args: argparse.Namespace, symbols: list[str], config: DeepData
             "synthetic_used": True,
             "events_path": event_paths,
         }
+    if getattr(args, "use_processed_data", False):
+        if not getattr(args, "market_panel", ""):
+            raise RuntimeError("--use-processed-data requires --market-panel")
+        panel = load_market_panel(args.market_panel)
+        auxiliary = combine_auxiliary_feature_frames(
+            oil_fundamentals=read_table(args.oil_fundamentals) if getattr(args, "oil_fundamentals", "") else None,
+            cot=read_table(args.cot) if getattr(args, "cot", "") else None,
+            cme_curve=read_table(args.cme_curve) if getattr(args, "cme_curve", "") else None,
+        )
+        event_context_frame = read_table(args.event_context) if getattr(args, "event_context", "") else None
+        samples = []
+        warnings: list[str] = []
+        for symbol in symbols:
+            symbol_panel = panel[panel["symbol"].astype(str) == symbol].copy()
+            if symbol_panel.empty:
+                warnings.append(f"No processed market panel rows for {symbol}")
+                continue
+            symbol_panel = symbol_panel.rename(columns={"timestamp": "date"})
+            try:
+                ds = build_deep_dataset_from_frame(
+                    symbol=symbol,
+                    interval=args.interval,
+                    candles=symbol_panel,
+                    config=config,
+                    event_provider=event_provider,
+                    auxiliary_frame=auxiliary,
+                    market_panel=panel,
+                    event_context_frame=event_context_frame,
+                )
+                samples.extend(ds.samples)
+            except Exception as exc:
+                warnings.append(f"{symbol}: {exc}")
+        if not samples:
+            raise RuntimeError(f"No usable processed samples were produced. Warnings: {warnings}")
+        train_idx, val_idx, test_idx = _time_split_indices(len(samples), config.validation_ratio, config.test_ratio)
+        return DeepDataset(samples=samples, train_indices=train_idx, validation_indices=val_idx, test_indices=test_idx), {
+            "source": "processed",
+            "symbols_used": symbols,
+            "warnings": warnings,
+            "synthetic_used": False,
+            "events_path": event_paths,
+            "data_inputs": {
+                "market_panel": getattr(args, "market_panel", ""),
+                "oil_fundamentals": getattr(args, "oil_fundamentals", "") or None,
+                "cot": getattr(args, "cot", "") or None,
+                "cme_curve": getattr(args, "cme_curve", "") or None,
+                "event_context": getattr(args, "event_context", "") or None,
+            },
+        }
     samples = []
     warnings: list[str] = []
     for symbol in symbols:
@@ -175,6 +232,13 @@ def build_dataset(args: argparse.Namespace, symbols: list[str], config: DeepData
         "warnings": warnings,
         "synthetic_used": False,
         "events_path": event_paths,
+        "data_inputs": {
+            "market_panel": None,
+            "oil_fundamentals": None,
+            "cot": None,
+            "cme_curve": None,
+            "event_context": None,
+        },
     }
 
 
@@ -235,6 +299,7 @@ def train_one(model_name: str, args: argparse.Namespace, dataset, config: DeepDa
         "related_assets_enabled": bool(config.related_assets_enabled),
         "git_commit": _git_commit(),
         "data_report": data_report,
+        "data_inputs": data_report.get("data_inputs", {}),
         "status": status,
         "notes": "Quick-test smoke artifact; not for production inference." if args.quick_test else None,
     }

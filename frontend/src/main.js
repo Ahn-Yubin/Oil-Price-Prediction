@@ -148,6 +148,7 @@ function convertForecastToChartPayload(forecast) {
     selected_models: forecast.selected_models || [],
     primary_model: forecast.primary_model || null,
     artifact_status: forecast.artifact_status || {},
+    calibration_status: forecast.calibration_status || {},
     llm_context_summary: forecast.llm_context_summary || {},
     explanation_hint: "Use /api/explanation for structured context.",
   };
@@ -182,6 +183,7 @@ function setDataStatusBadge(dataStatus) {
 function setForecastBadges(payload) {
   const confidence = document.getElementById("confidence-badge");
   const regime = document.getElementById("regime-badge");
+  const calibration = document.getElementById("calibration-badge");
   if (confidence) {
     const values = (payload.predicted || []).slice(1);
     confidence.textContent = values.length ? `CONF ${Math.round((payload.regime?.confidence || 0.5) * 100)}%` : "CONF -";
@@ -191,6 +193,11 @@ function setForecastBadges(payload) {
     const entries = Object.entries(probs).filter(([key]) => key !== "confidence");
     const label = entries.length ? entries.sort((a, b) => Number(b[1]) - Number(a[1]))[0][0] : "unknown";
     regime.textContent = `REGIME ${String(label).replaceAll("_", " ").toUpperCase()}`;
+  }
+  if (calibration) {
+    const status = String(payload.calibration_status?.calibration_status || "uncalibrated").toUpperCase();
+    calibration.textContent = `BAND ${status}`;
+    calibration.dataset.status = status.toLowerCase();
   }
   const modelValue = document.getElementById("model-value");
   if (modelValue && payload.primary_model) {
@@ -221,6 +228,48 @@ async function loadExplanation(symbol, interval) {
     panel.querySelector("#explanation-summary").textContent = "Explanation unavailable for this request.";
     panel.querySelector("#explanation-drivers").replaceChildren();
     panel.querySelector("#explanation-warning").textContent = "";
+  }
+}
+
+async function loadBacktestDiagnostics(symbol, interval) {
+  const table = document.getElementById("leaderboard-table");
+  const status = document.getElementById("diagnostics-status");
+  if (!table || !status) return;
+  try {
+    const res = await fetch(`/api/backtests?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error("backtest unavailable");
+    const body = await res.json();
+    status.textContent = body.status || "missing";
+    const rows = (body.leaderboard || []).slice(0, 8);
+    if (!rows.length) {
+      table.textContent = "No rolling leaderboard available.";
+      return;
+    }
+    const cols = ["model", "rmse", "mae", "pinball_loss", "coverage_80", "directional_accuracy"];
+    const header = document.createElement("div");
+    header.className = "leaderboard-row leaderboard-head";
+    cols.forEach((col) => {
+      const cell = document.createElement("span");
+      cell.textContent = col.replaceAll("_", " ").toUpperCase();
+      header.appendChild(cell);
+    });
+    const bodyRows = rows.map((row) => {
+      const line = document.createElement("div");
+      line.className = "leaderboard-row";
+      cols.forEach((col) => {
+        const cell = document.createElement("span");
+        const value = row[col];
+        cell.textContent = typeof value === "number" ? value.toFixed(3) : value ?? "-";
+        line.appendChild(cell);
+      });
+      return line;
+    });
+    table.replaceChildren(header, ...bodyRows);
+  } catch (_err) {
+    status.textContent = "missing";
+    table.textContent = "Backtest diagnostics unavailable.";
   }
 }
 
@@ -709,6 +758,7 @@ async function initDashboard(symbol, interval) {
     setForecastBadges(payload);
     setForecastNotices(payload);
     loadExplanation(symbol, interval);
+    loadBacktestDiagnostics(symbol, interval);
     try {
       const nextDataKey = `${payload.symbol_input}|${payload.interval_resolved}`;
       const shouldResetView = activeDataKey !== nextDataKey;

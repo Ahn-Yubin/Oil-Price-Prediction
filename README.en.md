@@ -13,7 +13,11 @@ uvicorn backend.app.main:app --reload --port 8000
 python scripts/train/train_pretrained_models.py --interval 1d
 python scripts/train/train_deep_fusion_models.py --model both --interval 1d --universe oil_core --epochs 10 --batch-size 64
 python scripts/train/train_deep_fusion_models.py --model deep_lstm_tcn_fusion --interval 1d --quick-test --epochs 1 --max-samples 256
+python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
+python scripts/data/build_event_context.py --events-path data/external/events/sample_market_events.csv --mode local_rules
+python scripts/data/build_data_inventory.py
 python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
+python scripts/evaluate/run_model_leaderboard.py --symbols CL=F,BZ=F,NG=F --interval 1d --max-origins 50
 python scripts/maintenance/check_docs_i18n.py
 python scripts/maintenance/smoke_test_api.py
 ```
@@ -28,8 +32,9 @@ If `python` is not available in the local shell, use `.venv/bin/python`.
 - `METADATA_DIR`: model metadata JSON location. Default: `artifacts/metadata`.
 - `DATA_DIR`: runtime data location. Default: `data`.
 - `DEFAULT_SYMBOL`, `DEFAULT_INTERVAL`: default symbol and interval.
-- `ENABLE_LLM_CONTEXT`, `LLM_API_KEY`, `LLM_MODEL`: LLM context encoder settings.
+- `ENABLE_LLM_CONTEXT`, `LLM_CONTEXT_MODE`, `LLM_API_KEY`, `LLM_API_BASE`, `LLM_MODEL`: LLM context encoder settings.
 - `ENABLE_EXTERNAL_LLM_CALLS`: allows external LLM calls. Default is `false`.
+- `LOCAL_LLM_API_BASE`, `LOCAL_LLM_MODEL`: local HTTP LLM endpoint settings.
 - `NEWS_EVENTS_PATH`, `ECONOMIC_EVENTS_PATH`, `MARKET_EVENTS_PATH`: deterministic event context file paths.
 
 ## API
@@ -70,6 +75,16 @@ The backtest CLI is `scripts/backtest/run_backtest.py`. Reusable logic lives in 
 ```bash
 python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
 ```
+
+## Real Data And Training Order
+
+1. Store a yfinance market panel with `scripts/data/fetch_market_prices.py`.
+2. Build point-in-time processed fundamentals with `scripts/data/fetch_eia_petroleum.py`, `fetch_cftc_cot.py`, and `fetch_cme_settlements.py` using APIs or manual CSVs.
+3. Generate daily event/news/LLM context with `scripts/data/build_event_context.py`.
+4. Retrain `deep_lstm_tcn_fusion` and `llm_context_seq_moe` with `scripts/train/train_deep_fusion_models.py --use-processed-data ...`.
+5. Build leaderboard and calibration artifacts with `scripts/evaluate/run_model_leaderboard.py` and `scripts/evaluate/calibrate_quantiles.py`.
+
+Large `.pt`/`.npz` artifacts may be excluded from Git, but metadata JSON, data manifests, and calibration manifests are managed for reproducibility.
 
 ## LLM Context Encoder
 

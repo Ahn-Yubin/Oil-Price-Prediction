@@ -16,6 +16,8 @@ from market_ai.features.deep_features import (
     build_static_features,
     empty_cross_asset_window,
 )
+from market_ai.features.context_features import EVENT_CONTEXT_DIM
+from market_ai.schemas.deep_learning import EventContextVector
 from market_ai.schemas.deep_learning import DeepDatasetConfig, DeepLearningSample
 
 
@@ -67,6 +69,169 @@ def _normalize_candles(candles: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
+def _available_time_column(frame: pd.DataFrame) -> str:
+    for col in ("feature_available_at", "as_of_time", "release_time", "timestamp", "date", "report_date", "trade_date"):
+        if col in frame.columns:
+            return col
+    raise ValueError("feature frame requires feature_available_at/as_of_time/release_time/timestamp/date column")
+
+
+def _normalize_feature_time_frame(frame: pd.DataFrame | None) -> pd.DataFrame | None:
+    if frame is None or frame.empty:
+        return None
+    out = frame.copy()
+    col = _available_time_column(out)
+    out["feature_available_at"] = pd.to_datetime(out[col], errors="coerce", utc=True)
+    out = out.dropna(subset=["feature_available_at"]).sort_values("feature_available_at")
+    return out.reset_index(drop=True)
+
+
+def _standardize(values: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    rolling = numeric.rolling(60, min_periods=8)
+    return ((numeric - rolling.mean()) / rolling.std().replace(0.0, np.nan)).clip(-6.0, 6.0)
+
+
+def combine_auxiliary_feature_frames(
+    *,
+    oil_fundamentals: pd.DataFrame | None = None,
+    cot: pd.DataFrame | None = None,
+    cme_curve: pd.DataFrame | None = None,
+) -> pd.DataFrame | None:
+    frames = []
+    for source, frame in [("oil_fundamentals", oil_fundamentals), ("cot", cot), ("cme_curve", cme_curve)]:
+        normalized = _normalize_feature_time_frame(frame)
+        if normalized is None:
+            continue
+        normalized = normalized.copy()
+        normalized["_source"] = source
+        frames.append(normalized)
+    if not frames:
+        return None
+    base = pd.DataFrame(
+        {
+            "feature_available_at": sorted(
+                set(pd.concat([frame[["feature_available_at"]] for frame in frames], ignore_index=True)["feature_available_at"])
+            )
+        }
+    )
+    out = base.sort_values("feature_available_at")
+    for frame in frames:
+        suffix = str(frame["_source"].iloc[0])
+        use = frame.drop(columns=["_source"]).sort_values("feature_available_at")
+        out = pd.merge_asof(out, use, on="feature_available_at", direction="backward", suffixes=("", f"_{suffix}"))
+    numeric_cols = [col for col in out.columns if col != "feature_available_at"]
+    for col in numeric_cols:
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+    return out
+
+
+def _first_numeric(row: pd.Series, candidates: tuple[str, ...], default: float = 0.0) -> float:
+    for col in candidates:
+        if col in row.index and pd.notna(row[col]):
+            try:
+                val = float(row[col])
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(val):
+                return val
+    return default
+
+
+def _build_auxiliary_cross_asset_matrix(frame: pd.DataFrame, symbol: str, auxiliary_frame: pd.DataFrame | None) -> np.ndarray:
+    if auxiliary_frame is None or auxiliary_frame.empty:
+        return empty_cross_asset_window(len(frame))
+    left = pd.DataFrame({"date": pd.to_datetime(frame["date"], errors="coerce", utc=True)})
+    right = _normalize_feature_time_frame(auxiliary_frame)
+    if right is None or right.empty:
+        return empty_cross_asset_window(len(frame))
+    merged = pd.merge_asof(left.sort_values("date"), right.sort_values("feature_available_at"), left_on="date", right_on="feature_available_at", direction="backward")
+    arr = np.zeros((len(merged), len(CROSS_ASSET_FEATURE_COLUMNS)), dtype=np.float32)
+    feature_cols = set(right.columns)
+    has_feature = merged["feature_available_at"].notna().to_numpy()
+    for idx, row in merged.iterrows():
+        arr[idx, CROSS_ASSET_FEATURE_COLUMNS.index("spread")] = _first_numeric(
+            row,
+            ("m1_m2_spread", "imports_exports_spread", "crude_stocks_change", "cushing_stocks_change"),
+        )
+        arr[idx, CROSS_ASSET_FEATURE_COLUMNS.index("relative_strength")] = _first_numeric(
+            row,
+            ("managed_money_net_zscore", "managed_money_net", "refinery_utilization"),
+        )
+        arr[idx, CROSS_ASSET_FEATURE_COLUMNS.index("risk_on_off_proxy")] = _first_numeric(
+            row,
+            ("curve_slope_m1_m6", "open_interest_change", "crude_production_change"),
+        )
+        arr[idx, CROSS_ASSET_FEATURE_COLUMNS.index("missing_indicator")] = 0.0 if has_feature[idx] else 1.0
+    del symbol, feature_cols
+    return np.nan_to_num(arr, nan=0.0, posinf=6.0, neginf=-6.0).astype(np.float32)
+
+
+def _build_market_panel_cross_asset_matrix(frame: pd.DataFrame, symbol: str, market_panel: pd.DataFrame | None) -> np.ndarray | None:
+    if market_panel is None or market_panel.empty:
+        return None
+    panel = market_panel.copy()
+    if "timestamp" not in panel.columns or "symbol" not in panel.columns or "close" not in panel.columns:
+        return None
+    panel["timestamp"] = pd.to_datetime(panel["timestamp"], errors="coerce", utc=True)
+    panel["close"] = pd.to_numeric(panel["close"], errors="coerce")
+    pivot = panel.dropna(subset=["timestamp", "symbol", "close"]).pivot_table(index="timestamp", columns="symbol", values="close", aggfunc="last").sort_index()
+    if symbol not in pivot.columns or len(pivot.columns) < 2:
+        return None
+    returns = np.log(pivot / pivot.shift(1)).replace([np.inf, -np.inf], np.nan)
+    others = [col for col in returns.columns if col != symbol]
+    related_return = returns[others].mean(axis=1)
+    corr_parts = [returns[symbol].rolling(20, min_periods=6).corr(returns[col]) for col in others]
+    rolling_corr = pd.concat(corr_parts, axis=1).mean(axis=1) if corr_parts else pd.Series(0.0, index=returns.index)
+    target = pd.DataFrame(
+        {
+            "feature_available_at": related_return.index,
+            "related_returns": related_return.to_numpy(),
+            "related_rolling_corr": rolling_corr.reindex(related_return.index).to_numpy(),
+        }
+    )
+    left = pd.DataFrame({"date": pd.to_datetime(frame["date"], errors="coerce", utc=True)})
+    merged = pd.merge_asof(left.sort_values("date"), target.sort_values("feature_available_at"), left_on="date", right_on="feature_available_at", direction="backward")
+    arr = np.zeros((len(merged), len(CROSS_ASSET_FEATURE_COLUMNS)), dtype=np.float32)
+    arr[:, CROSS_ASSET_FEATURE_COLUMNS.index("related_returns")] = pd.to_numeric(merged["related_returns"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
+    arr[:, CROSS_ASSET_FEATURE_COLUMNS.index("related_rolling_corr")] = pd.to_numeric(merged["related_rolling_corr"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
+    arr[:, CROSS_ASSET_FEATURE_COLUMNS.index("missing_indicator")] = merged["feature_available_at"].isna().astype(float).to_numpy(dtype=np.float32)
+    return arr
+
+
+def _merge_cross_asset_matrices(aux: np.ndarray, market: np.ndarray | None) -> np.ndarray:
+    if market is None:
+        return aux
+    out = aux.copy()
+    for name in ("related_returns", "related_rolling_corr"):
+        idx = CROSS_ASSET_FEATURE_COLUMNS.index(name)
+        out[:, idx] = market[:, idx]
+    missing_idx = CROSS_ASSET_FEATURE_COLUMNS.index("missing_indicator")
+    out[:, missing_idx] = np.minimum(out[:, missing_idx], market[:, missing_idx])
+    return out
+
+
+def _event_context_frame_vector(event_context_frame: pd.DataFrame | None, *, symbol: str, as_of_time: datetime) -> list[float] | None:
+    normalized = _normalize_feature_time_frame(event_context_frame)
+    if normalized is None or normalized.empty:
+        return None
+    frame = normalized
+    if "symbol" in frame.columns:
+        symbol_upper = symbol.upper()
+        frame = frame[frame["symbol"].astype(str).str.upper().isin([symbol_upper, "ALL", "*"])]
+    if frame.empty:
+        return None
+    left = pd.DataFrame({"date": [pd.Timestamp(as_of_time).tz_convert("UTC") if pd.Timestamp(as_of_time).tzinfo else pd.Timestamp(as_of_time, tz="UTC")]})
+    merged = pd.merge_asof(left, frame.sort_values("feature_available_at"), left_on="date", right_on="feature_available_at", direction="backward")
+    if merged.empty or pd.isna(merged.loc[0, "feature_available_at"]):
+        return None
+    names = list(EventContextVector.model_fields)
+    values = [float(pd.to_numeric(pd.Series([merged.loc[0, name] if name in merged.columns else 0.0]), errors="coerce").fillna(0.0).iloc[0]) for name in names]
+    if len(values) < EVENT_CONTEXT_DIM:
+        values.extend([0.0] * (EVENT_CONTEXT_DIM - len(values)))
+    return values[:EVENT_CONTEXT_DIM]
+
+
 def _future_volatility(returns: np.ndarray, start: int, horizon: int) -> np.ndarray:
     vals: list[float] = []
     for h in range(1, horizon + 1):
@@ -103,10 +268,16 @@ def build_deep_dataset_from_frame(
     candles: pd.DataFrame,
     config: DeepDatasetConfig,
     event_provider: FileEventProvider | None = None,
+    auxiliary_frame: pd.DataFrame | None = None,
+    market_panel: pd.DataFrame | None = None,
+    event_context_frame: pd.DataFrame | None = None,
 ) -> DeepDataset:
     frame = _normalize_candles(candles)
     provider = event_provider or (FileEventProvider.from_env() if config.event_context_enabled else NullEventProvider())
     features = build_deep_price_features(frame)
+    auxiliary_cross_asset = _build_auxiliary_cross_asset_matrix(frame, symbol, auxiliary_frame)
+    market_cross_asset = _build_market_panel_cross_asset_matrix(frame, symbol, market_panel)
+    cross_asset_matrix = _merge_cross_asset_matrices(auxiliary_cross_asset, market_cross_asset)
     close = frame["close"].to_numpy(dtype=np.float64)
     log_close = np.log(close)
     returns_by_bar = np.zeros(len(close), dtype=np.float64)
@@ -128,7 +299,9 @@ def build_deep_dataset_from_frame(
         scaled_target = np.clip(future_log_path / recent_vol, -12.0, 12.0).astype(np.float32)
         future_returns = returns_by_bar[origin + 1 : origin + horizon + 1]
         as_of_time = pd.Timestamp(frame.loc[origin, "date"]).to_pydatetime()
-        event_vector = provider.context_vector(symbol=symbol, as_of_time=as_of_time).as_list()
+        event_vector = _event_context_frame_vector(event_context_frame, symbol=symbol, as_of_time=as_of_time)
+        if event_vector is None:
+            event_vector = provider.context_vector(symbol=symbol, as_of_time=as_of_time).as_list()
         samples.append(
             DeepLearningSample(
                 symbol=symbol,
@@ -137,7 +310,7 @@ def build_deep_dataset_from_frame(
                 lookback=lookback,
                 horizon=horizon,
                 x_price=feature_window[list(PRICE_FEATURE_COLUMNS)].to_numpy(dtype=np.float32).tolist(),
-                x_cross_asset=empty_cross_asset_window(lookback).tolist(),
+                x_cross_asset=cross_asset_matrix[origin - lookback + 1 : origin + 1].astype(np.float32).tolist(),
                 x_event_context=[float(x) for x in event_vector],
                 x_static=build_static_features(
                     current_price=current_price,

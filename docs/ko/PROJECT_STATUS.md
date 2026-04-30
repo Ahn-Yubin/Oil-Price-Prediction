@@ -91,8 +91,8 @@ Frontend는 `/api/forecast`가 성공하면 p50, p10, p90, p05, p95와 bull/base
 
 Deep `.pt` artifact 상태:
 
-- `deep_lstm_tcn_fusion_1d_h45.pt`: 아직 없음. `/api/models`에서 `artifact_missing`으로 표시됩니다.
-- `llm_context_seq_moe_1d_h45.pt`: 아직 없음. `/api/models`에서 `artifact_missing`으로 표시됩니다.
+- `deep_lstm_tcn_fusion_1d_h45.pt`: 존재하며 metadata `status=available`입니다.
+- `llm_context_seq_moe_1d_h45.pt`: 존재하며 metadata `status=available`입니다.
 - quick-test `1d/h8` artifact는 smoke 용도이며 dashboard default `1d/h45` candidate로 사용하지 않습니다.
 - `status=smoke_only` 또는 `status=synthetic_only` metadata는 production available로 보지 않습니다.
 
@@ -164,16 +164,18 @@ Training CLI는 production 기본값에서 yfinance 실패 시 synthetic fallbac
 - interval별 global `.npz` artifact와 metadata sidecar가 분리되어 있습니다.
 - Deep model code path, deep dataset, event context pipeline, `/api/forecast` models query, `/api/models` availability가 구현되었습니다.
 - `--events-path`는 training dataset의 `FileEventProvider`로 실제 전달됩니다.
-- Cross-asset feature는 아직 placeholder/missing-indicator 중심이며 full feature matrix 단계가 아닙니다.
+- yfinance market panel 저장, EIA/CFTC/CME manual CSV ingest, event context daily build, data manifest 생성 경로가 추가되었습니다.
+- processed-data training CLI가 market panel, oil fundamentals, COT, CME curve, event context를 받을 수 있습니다.
+- rolling leaderboard latest output과 conformal calibration artifact 경로가 추가되었습니다.
 
 ## 아직 제한적인 부분
 
-- `deep_lstm_tcn_fusion`과 `llm_context_seq_moe`의 full `1d/h45` production artifact가 아직 없습니다.
+- `deep_lstm_tcn_fusion`과 `llm_context_seq_moe`의 full `1d/h45` artifact는 존재하지만, 감사 기준으로 yfinance 가격과 샘플 event context 중심 학습이라 실전 fundamental/news coverage가 부족합니다.
 - Deep quick training은 smoke 검증용이며 production 성능을 의미하지 않습니다.
-- Quantile band calibration은 완전 검증 상태가 아닙니다.
+- Quantile band calibration artifact 경로와 API 연결은 생겼지만, 실제 rolling residual로 충분히 calibrate되기 전에는 unvalidated 상태입니다.
 - `pattern_mlp` metadata는 `legacy_npz_v1` 상태이며 data hash, git commit, train_start/train_end가 비어 있습니다.
-- Cross-asset feature matrix는 실제 related asset value보다 missing indicator placeholder 비중이 큽니다.
-- yfinance 의존성이 강하므로 provider abstraction과 cache/storage 계층이 더 필요합니다.
+- Cross-asset feature matrix는 processed market panel과 fundamental summary를 받을 수 있지만, 현재 운영 artifact는 아직 이 확장 feature로 장기 재학습되지 않았습니다.
+- yfinance market panel cache/storage와 EIA/CFTC/CME/manual CSV ingest 경로가 추가되었지만, 실제 장기 데이터 적재는 별도 실행이 필요합니다.
 
 ## 다음 작업 제안
 

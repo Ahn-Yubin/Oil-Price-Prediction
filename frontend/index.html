@@ -98,6 +98,7 @@
           <h3>TradingView-Style Live Chart + AI Forecast</h3>
           <div class="chart-meta">
             <span id="data-status-badge" class="data-status-badge">DATA -</span>
+            <span id="calibration-badge" class="data-status-badge">BAND -</span>
             <span id="confidence-badge" class="data-status-badge">CONF -</span>
             <span id="regime-badge" class="data-status-badge">REGIME -</span>
             <p id="chart-updated-value">Updated -</p>
@@ -118,6 +119,14 @@
         <p id="explanation-summary">-</p>
         <ul id="explanation-drivers"></ul>
         <p id="explanation-warning" class="explanation-warning"></p>
+      </section>
+
+      <section id="model-diagnostics-panel" class="diagnostics-panel">
+        <div class="explanation-head">
+          <h3>Model Diagnostics</h3>
+          <span id="diagnostics-status">-</span>
+        </div>
+        <div id="leaderboard-table" class="leaderboard-table"></div>
       </section>
     </main>
 

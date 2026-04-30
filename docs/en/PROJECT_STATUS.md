@@ -91,8 +91,8 @@ Current production `.npz` artifacts:
 
 Deep `.pt` artifact status:
 
-- `deep_lstm_tcn_fusion_1d_h45.pt`: missing. `/api/models` reports `artifact_missing`.
-- `llm_context_seq_moe_1d_h45.pt`: missing. `/api/models` reports `artifact_missing`.
+- `deep_lstm_tcn_fusion_1d_h45.pt`: exists with metadata `status=available`.
+- `llm_context_seq_moe_1d_h45.pt`: exists with metadata `status=available`.
 - Quick-test `1d/h8` artifacts are smoke-only and are not used by the dashboard default `1d/h45` candidates.
 - Metadata with `status=smoke_only` or `status=synthetic_only` is not considered production available.
 
@@ -164,16 +164,18 @@ Backtesting uses a walk-forward rolling origin design. Each origin uses only his
 - Interval-specific global `.npz` artifacts and metadata sidecars are separated.
 - Deep model code paths, deep dataset, event context pipeline, `/api/forecast` models query, and `/api/models` availability are implemented.
 - `--events-path` is now passed into the training dataset through `FileEventProvider`.
-- Cross-asset features are still mostly placeholder/missing-indicator based, not a full feature matrix.
+- yfinance market panel storage, EIA/CFTC/CME manual CSV ingest, daily event context build, and data manifest generation paths are available.
+- The processed-data training CLI can accept market panels, oil fundamentals, COT, CME curves, and event context.
+- Rolling leaderboard latest output and conformal calibration artifact paths are available.
 
 ## Current Limitations
 
-- Full `1d/h45` production artifacts for `deep_lstm_tcn_fusion` and `llm_context_seq_moe` are still missing.
+- Full `1d/h45` artifacts for `deep_lstm_tcn_fusion` and `llm_context_seq_moe` exist, but at audit time they were still trained mostly on yfinance prices and sample event context rather than full real fundamentals/news coverage.
 - Deep quick training is smoke validation only and does not imply production performance.
-- Forecast band calibration is not fully validated.
+- Forecast band calibration paths and API wiring now exist, but bands remain unvalidated until enough rolling residuals are calibrated.
 - `pattern_mlp` metadata is still marked `legacy_npz_v1`, and data hash, git commit, train_start, and train_end are empty.
-- The cross-asset feature matrix is still dominated by missing-indicator placeholders rather than real related asset values.
-- The system still depends heavily on yfinance, so provider abstraction and cache/storage need more work.
+- The cross-asset feature matrix can now accept processed market-panel and fundamental summaries, but current operating artifacts have not yet been long-trained on those expanded features.
+- yfinance market panel cache/storage and EIA/CFTC/CME/manual CSV ingest paths are available, but actual long-history data loading must still be run.
 
 ## Recommended Next Work
 

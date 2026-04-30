@@ -37,7 +37,16 @@ def _contains_forbidden_numeric_forecast(value: Any) -> bool:
 def validate_llm_context_output(output: LLMContextOutput, raw: Any | None = None) -> LLMContextOutput:
     warnings = list(output.warnings)
     if raw is not None and _contains_forbidden_numeric_forecast(raw):
-        warnings.append("LLM output contained forbidden numeric forecast fields; numeric fields were ignored.")
+        warnings.append("LLM output contained forbidden numeric forecast fields; structured context was rejected.")
+        return LLMContextOutput(
+            events=[],
+            overall_bias="unknown",
+            impact_score=0.0,
+            uncertainty=1.0,
+            event_embedding=[],
+            explanation="Structured context rejected because the LLM output attempted to include numeric forecast fields.",
+            warnings=warnings,
+        )
     if _contains_forbidden_numeric_forecast(output.explanation):
         output = output.model_copy(update={"explanation": "Structured context only; numeric forecast text was removed."})
         warnings.append("LLM explanation contained forbidden numeric forecast text and was replaced.")
@@ -128,16 +137,26 @@ class LocalEventContextEncoder(BaseLLMEventEncoder):
 
 
 class OpenAICompatibleLLMEventEncoder(BaseLLMEventEncoder):
-    def __init__(self, api_key: str | None, model: str, *, enabled: bool = False, api_base: str | None = None, timeout: float = 8.0):
+    def __init__(
+        self,
+        api_key: str | None,
+        model: str,
+        *,
+        enabled: bool = False,
+        api_base: str | None = None,
+        timeout: float = 8.0,
+        fallback_provider: FileEventProvider | None = None,
+    ):
         self.api_key = api_key
         self.model = model
         self.enabled = enabled
         self.api_base = api_base or "https://api.openai.com/v1/chat/completions"
         self.timeout = timeout
+        self.fallback_provider = fallback_provider
 
     def encode_events(self, context: MarketContextInput) -> LLMContextOutput:
         if not self.enabled or not self.api_key:
-            return LocalEventContextEncoder().encode_events(context)
+            return LocalEventContextEncoder(self.fallback_provider).encode_events(context)
         payload = {
             "model": self.model,
             "messages": [
@@ -171,8 +190,102 @@ class OpenAICompatibleLLMEventEncoder(BaseLLMEventEncoder):
             except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_error = exc
                 time.sleep(0.15 * (attempt + 1))
-        fallback = LocalEventContextEncoder().encode_events(context)
+        fallback = LocalEventContextEncoder(self.fallback_provider).encode_events(context)
         return fallback.model_copy(update={"warnings": [*fallback.warnings, f"External LLM fallback: {last_error}"]})
+
+
+class LocalHTTPLLMEventEncoder(BaseLLMEventEncoder):
+    def __init__(
+        self,
+        api_base: str,
+        model: str,
+        *,
+        enabled: bool = False,
+        timeout: float = 8.0,
+        fallback_provider: FileEventProvider | None = None,
+    ):
+        self.api_base = api_base
+        self.model = model
+        self.enabled = enabled
+        self.timeout = timeout
+        self.fallback_provider = fallback_provider
+
+    def encode_events(self, context: MarketContextInput) -> LLMContextOutput:
+        if not self.enabled:
+            fallback = LocalEventContextEncoder(self.fallback_provider).encode_events(context)
+            return fallback.model_copy(update={"warnings": [*fallback.warnings, "Local HTTP LLM dry-run; local_rules fallback used."]})
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Encode market events as structured context only. "
+                        "Do not output price targets, p50/p90 prices, or future return paths."
+                    ),
+                },
+                {"role": "user", "content": context.model_dump_json()},
+            ],
+            "stream": False,
+            "temperature": 0.0,
+        }
+        try:
+            request = urllib.request.Request(
+                self.api_base,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                body = json.loads(response.read().decode("utf-8"))
+            content = (
+                body.get("choices", [{}])[0].get("message", {}).get("content")
+                or body.get("message", {}).get("content")
+                or body.get("response")
+                or body.get("content")
+            )
+            return parse_llm_context_json(str(content or "{}"))
+        except Exception as exc:
+            fallback = LocalEventContextEncoder(self.fallback_provider).encode_events(context)
+            return fallback.model_copy(update={"warnings": [*fallback.warnings, f"Local HTTP LLM fallback: {exc}"]})
+
+
+class OfflineFileLLMEventEncoder(BaseLLMEventEncoder):
+    def __init__(self, path: str | Any):
+        from pathlib import Path
+
+        self.path = Path(path)
+        self._cache: dict[tuple[str, str], LLMContextOutput] | None = None
+
+    def _load(self) -> dict[tuple[str, str], LLMContextOutput]:
+        if self._cache is not None:
+            return self._cache
+        cache: dict[tuple[str, str], LLMContextOutput] = {}
+        if not self.path.exists():
+            self._cache = cache
+            return cache
+        lines = self.path.read_text(encoding="utf-8").splitlines() if self.path.suffix == ".jsonl" else [self.path.read_text(encoding="utf-8")]
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                raw = json.loads(line)
+                symbol = str(raw.get("symbol") or raw.get("context", {}).get("symbol") or "")
+                as_of = str(raw.get("as_of_time") or raw.get("generated_at") or "")
+                output = raw.get("output", raw)
+                cache[(symbol, as_of[:10])] = validate_llm_context_output(LLMContextOutput.model_validate(output), raw=output)
+            except Exception:
+                continue
+        self._cache = cache
+        return cache
+
+    def encode_events(self, context: MarketContextInput) -> LLMContextOutput:
+        as_of = (context.generated_at or datetime.now(timezone.utc)).date().isoformat()
+        cached = self._load().get((context.symbol, as_of))
+        if cached is not None:
+            return cached
+        fallback = LocalEventContextEncoder().encode_events(context)
+        return fallback.model_copy(update={"warnings": [*fallback.warnings, "Offline LLM context cache miss; local_rules fallback used."]})
 
 
 def parse_llm_context_json(raw: str) -> LLMContextOutput:
@@ -189,6 +302,17 @@ def parse_llm_context_json(raw: str) -> LLMContextOutput:
 def encoder_from_settings(settings: Settings) -> BaseLLMEventEncoder:
     if not settings.enable_llm_context:
         return NullLLMEventEncoder()
+    mode = (settings.llm_context_mode or "local_rules").strip().lower()
+    if mode == "none":
+        return NullLLMEventEncoder()
+    if mode == "local_http":
+        return LocalHTTPLLMEventEncoder(
+            api_base=settings.local_llm_api_base,
+            model=settings.local_llm_model,
+            enabled=settings.enable_external_llm_calls,
+        )
+    if mode == "local_rules":
+        return LocalEventContextEncoder()
     if settings.is_development and not settings.llm_api_key:
         return LocalEventContextEncoder()
     return OpenAICompatibleLLMEventEncoder(

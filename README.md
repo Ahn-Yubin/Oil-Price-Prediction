@@ -13,7 +13,11 @@ uvicorn backend.app.main:app --reload --port 8000
 python scripts/train/train_pretrained_models.py --interval 1d
 python scripts/train/train_deep_fusion_models.py --model both --interval 1d --universe oil_core --epochs 10 --batch-size 64
 python scripts/train/train_deep_fusion_models.py --model deep_lstm_tcn_fusion --interval 1d --quick-test --epochs 1 --max-samples 256
+python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
+python scripts/data/build_event_context.py --events-path data/external/events/sample_market_events.csv --mode local_rules
+python scripts/data/build_data_inventory.py
 python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
+python scripts/evaluate/run_model_leaderboard.py --symbols CL=F,BZ=F,NG=F --interval 1d --max-origins 50
 python scripts/maintenance/check_docs_i18n.py
 python scripts/maintenance/smoke_test_api.py
 ```
@@ -28,8 +32,9 @@ python scripts/maintenance/smoke_test_api.py
 - `METADATA_DIR`: model metadata JSON 위치입니다. 기본값은 `artifacts/metadata`입니다.
 - `DATA_DIR`: runtime data 위치입니다. 기본값은 `data`입니다.
 - `DEFAULT_SYMBOL`, `DEFAULT_INTERVAL`: 기본 symbol과 interval입니다.
-- `ENABLE_LLM_CONTEXT`, `LLM_API_KEY`, `LLM_MODEL`: LLM context encoder 설정입니다.
+- `ENABLE_LLM_CONTEXT`, `LLM_CONTEXT_MODE`, `LLM_API_KEY`, `LLM_API_BASE`, `LLM_MODEL`: LLM context encoder 설정입니다.
 - `ENABLE_EXTERNAL_LLM_CALLS`: 외부 LLM 호출 허용 여부입니다. 기본값은 `false`입니다.
+- `LOCAL_LLM_API_BASE`, `LOCAL_LLM_MODEL`: local HTTP LLM endpoint 설정입니다.
 - `NEWS_EVENTS_PATH`, `ECONOMIC_EVENTS_PATH`, `MARKET_EVENTS_PATH`: deterministic event context 파일 경로입니다.
 
 ## API
@@ -70,6 +75,16 @@ Backtest CLI는 `scripts/backtest/run_backtest.py`입니다. 재사용 가능한
 ```bash
 python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
 ```
+
+## 실전 데이터와 학습 순서
+
+1. `scripts/data/fetch_market_prices.py`로 yfinance market panel을 저장합니다.
+2. `scripts/data/fetch_eia_petroleum.py`, `fetch_cftc_cot.py`, `fetch_cme_settlements.py`로 API 또는 manual CSV fundamental 데이터를 point-in-time processed dataset으로 만듭니다.
+3. `scripts/data/build_event_context.py`로 event/news/LLM context daily dataset을 생성합니다.
+4. `scripts/train/train_deep_fusion_models.py --use-processed-data ...`로 `deep_lstm_tcn_fusion`과 `llm_context_seq_moe`를 재학습합니다.
+5. `scripts/evaluate/run_model_leaderboard.py`와 `scripts/evaluate/calibrate_quantiles.py`로 leaderboard와 calibration artifact를 만듭니다.
+
+대용량 `.pt`/`.npz` artifact는 Git에서 제외될 수 있지만, metadata JSON, data manifest, calibration manifest는 재현성을 위해 관리합니다.
 
 ## LLM Context Encoder
 

@@ -37,3 +37,48 @@ Random split은 사용하지 않습니다. 각 symbol의 뒤쪽 구간을 valida
 - `data/features`: feature matrix
 - `data/external`: event file 등 외부 보조 데이터
 - `configs/symbol_universe.yaml`: 학습 universe
+
+## 2026-04-30 실전 데이터 확장
+
+데이터 lake 구조는 다음 상대경로를 표준으로 사용합니다.
+
+- `data/raw/market`, `data/raw/eia`, `data/raw/cftc`, `data/raw/cme`, `data/raw/events`, `data/raw/news`
+- `data/interim/market`, `data/interim/fundamentals`, `data/interim/events`
+- `data/processed/market_panel`, `data/processed/oil_fundamentals`, `data/processed/event_context`
+- `data/features/deep_training`
+- `data/manifests/data_inventory.json`, `data/manifests/latest_snapshot.json`
+
+Market panel:
+
+```bash
+python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
+python scripts/data/fetch_market_prices.py --universe default_global --interval 1d --period 10y
+```
+
+원본 cache는 `data/raw/market/{provider}/{interval}/{symbol}.csv`에 저장하고, processed panel은 `data/processed/market_panel/{interval}/panel.parquet` 또는 parquet engine이 없을 때 `panel.csv`로 저장합니다. yfinance 실패 시 synthetic으로 대체하지 않고 실패 report를 남깁니다.
+
+EIA/CFTC/CME:
+
+```bash
+python scripts/data/fetch_eia_petroleum.py --manual-csv path/to/eia.csv
+python scripts/data/fetch_cftc_cot.py --manual-csv path/to/cftc.csv
+python scripts/data/fetch_cme_settlements.py --manual-csv path/to/cme.csv
+```
+
+API key나 licensed provider가 없어도 manual CSV ingest는 지원합니다. CME는 유료/라이선스 데이터가 필요할 수 있으므로 fake scraping을 하지 않습니다. Weekly fundamental/COT 데이터는 `release_time` 또는 보수적 release timestamp 이후에만 daily feature로 forward-fill됩니다.
+
+Event context:
+
+```bash
+python scripts/data/build_event_context.py --events-path data/external/events/sample_market_events.csv --mode local_rules
+```
+
+출력은 `data/processed/event_context/event_context_daily.csv`와 `llm_context_cache.jsonl`입니다. 모든 event/news/fundamental feature는 `feature_available_at <= as_of_time` 조건을 기준으로 merge됩니다.
+
+Manifest:
+
+```bash
+python scripts/data/build_data_inventory.py
+```
+
+Manifest entry는 dataset name, source, path, symbol/series, frequency, start/end, rows, columns, generated time, source/provider, point-in-time safety flag, notes를 기록합니다.

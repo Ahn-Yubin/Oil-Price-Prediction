@@ -21,6 +21,7 @@ from market_ai.modeling.deep.availability import DeepArtifactAvailability, deep_
 from market_ai.modeling.forecasters.deep_fusion import DeepModelUnavailable, forecast_with_deep_model
 from market_ai.modeling.forecasters.neural_npz import PretrainedModelNotFoundError
 from market_ai.modeling.forecasters.motif import forecast_model_comparison
+from market_ai.modeling.calibration.conformal import apply_calibration_to_points, load_calibration_artifact
 from market_ai.modeling.model_catalog import DEEP_MODELS, USER_FACING_MODELS, InvalidModelRequest, resolve_model_selection, split_model_query
 from market_ai.schemas.market import (
     DataStatusKind,
@@ -495,6 +496,12 @@ def build_forecast(
         fallback_band=band,
         data_status=market.data_status.status,
     )
+    calibration_artifact = load_calibration_artifact(str(primary.get("id")), market.symbol.provider_symbol, resolved_interval)
+    forecast_points = apply_calibration_to_points(
+        forecast_points,
+        current_price=current_price,
+        artifact=calibration_artifact,
+    )
 
     for message in market.data_status.warnings:
         _add_warning(
@@ -504,14 +511,25 @@ def build_forecast(
             severity="warning",
             message=message,
         )
-    _add_warning(
-        warnings=warnings,
-        warning_objects=warning_objects,
-        code="quantile_bands_uncalibrated",
-        severity="info",
-        message="Quantile bands are residual-volatility adapters and are not validated coverage intervals yet.",
-        action="Run rolling coverage calibration before labeling bands as validated confidence intervals.",
+    calibration_status = (
+        calibration_artifact.as_dict()
+        if calibration_artifact is not None
+        else {
+            "model": str(primary.get("id")),
+            "symbol": market.symbol.provider_symbol,
+            "interval": resolved_interval,
+            "calibration_status": "uncalibrated",
+        }
     )
+    if calibration_artifact is None or calibration_artifact.calibration_status != "calibrated":
+        _add_warning(
+            warnings=warnings,
+            warning_objects=warning_objects,
+            code="quantile_bands_uncalibrated",
+            severity="info",
+            message="Quantile bands are residual-volatility adapters and are not validated coverage intervals yet.",
+            action="Run rolling coverage calibration before labeling bands as validated confidence intervals.",
+        )
     status_value = str(market.data_status.status)
     if status_value in {DataStatusKind.mock.value, DataStatusKind.fallback.value, DataStatusKind.stale.value}:
         _add_warning(
@@ -587,6 +605,7 @@ def build_forecast(
         deep_model_info=deep_model_info,
         feature_version=model_info.get("feature_version") or model_info.get("feature_set"),
         artifact_status=artifact_status,
+        calibration_status=calibration_status,
     )
     return ForecastBundle(
         response=response,
@@ -635,8 +654,11 @@ def chart_payload_from_forecast(bundle: ForecastBundle) -> dict[str, Any]:
         "deep_model_info": response.deep_model_info,
         "feature_version": response.feature_version,
         "artifact_status": response.artifact_status,
+        "calibration_status": response.calibration_status,
         "confidence_level": None,
-        "band_label": "uncalibrated residual-volatility quantile adapter",
+        "band_label": "calibrated conformal quantile band"
+        if response.calibration_status.get("calibration_status") == "calibrated"
+        else "uncalibrated residual-volatility quantile adapter",
         "model_trained_at": bundle.model_info.get("trained_at"),
         "model_train_symbols": bundle.model_info.get("train_symbols"),
         "model_sample_info": {

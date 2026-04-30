@@ -243,3 +243,4 @@ class ForecastResponse(BaseModel):
     deep_model_info: dict[str, Any] = Field(default_factory=dict)
     feature_version: str | None = None
     artifact_status: dict[str, str] = Field(default_factory=dict)
+    calibration_status: dict[str, Any] = Field(default_factory=dict)

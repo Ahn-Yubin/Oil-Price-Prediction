@@ -38,6 +38,20 @@ price_t+h = current_price * exp(predicted_cumulative_log_return_h)
 
 Quantile path는 monotonic해야 합니다. Coverage가 backtest로 측정되기 전에는 probabilistic band를 검증된 confidence interval이라고 부르지 않습니다.
 
+Rolling backtest residual로 `artifacts/calibration/{model}_{symbol}_{interval}.json` conformal artifact를 만들 수 있습니다. Artifact가 `calibration_status=calibrated`이면 API는 band를 조정하고, 없으면 unvalidated residual-volatility adapter warning을 유지합니다.
+
+## 실전 Feature 입력
+
+Processed-data 학습에서는 가격 window 외에 다음 입력을 사용할 수 있습니다.
+
+- `data/processed/market_panel/{interval}/panel.parquet` 또는 CSV fallback
+- `data/processed/oil_fundamentals/eia_weekly.csv`
+- `data/processed/oil_fundamentals/cftc_cot_weekly.csv`
+- `data/processed/oil_fundamentals/cme_curve_daily.csv`
+- `data/processed/event_context/event_context_daily.csv`
+
+EIA/CFTC/CME/event context는 `feature_available_at <= as_of_time`인 값만 `merge_asof`로 sample에 들어갑니다. 현재 artifact 호환성을 위해 fundamental/COT/CME 요약값은 `x_cross_asset`의 spread, relative strength, risk proxy slot에 들어가고, event/LLM vector는 `x_event_context`에 들어갑니다.
+
 ## Artifact와 Metadata
 
 `.npz`와 `.pt` model artifact는 `artifacts/models`에 둡니다. Metadata JSON은 `artifacts/metadata`에 둡니다. Artifact가 없으면 API는 `artifact_status`와 warning을 반환하고 가능한 fallback을 사용합니다.
