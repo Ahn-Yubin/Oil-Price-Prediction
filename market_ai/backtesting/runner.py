@@ -638,6 +638,10 @@ def write_backtest_outputs(outputs: dict[str, pd.DataFrame], output_dir: Path, p
         path = output_dir / f"{prefix}_{name}.csv"
         outputs.get(name, pd.DataFrame()).to_csv(path, index=False)
         written.append(path)
+        if name == "model_availability":
+            latest_path = output_dir / "latest_model_availability.csv"
+            outputs.get(name, pd.DataFrame()).to_csv(latest_path, index=False)
+            written.append(latest_path)
     sample_path = output_dir / f"{prefix}_last_origin_paths.csv"
     outputs.get("sample", pd.DataFrame()).to_csv(sample_path, index=False)
     written.append(sample_path)

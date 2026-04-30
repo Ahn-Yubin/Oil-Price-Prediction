@@ -1,0 +1,59 @@
+{
+  "model_name": "llm_context_seq_moe",
+  "model_type": "deep_sequence",
+  "version": "deep_v1",
+  "artifact_file": "llm_context_seq_moe_1d_h45.pt",
+  "interval": "1d",
+  "created_at": "2026-04-30T03:57:19.443067+00:00",
+  "train_start": "2022-01-27T00:00:00+00:00",
+  "train_end": "2026-02-24T00:00:00+00:00",
+  "training_cutoff": "2026-02-24T00:00:00+00:00",
+  "asset_universe": [
+    "CL=F",
+    "BZ=F",
+    "NG=F",
+    "RB=F",
+    "HO=F"
+  ],
+  "supported_asset_classes": [
+    "unknown"
+  ],
+  "supported_intervals": [
+    "1d"
+  ],
+  "lookback": 128,
+  "horizon": 45,
+  "target": "volatility_scaled_cumulative_log_return_distribution",
+  "feature_set": "deep_price_v1",
+  "scaler": "recent_realized_volatility",
+  "n_train": 3584,
+  "n_val": 768,
+  "n_test": 768,
+  "data_source": "yfinance",
+  "synthetic_used": false,
+  "event_context_enabled": true,
+  "events_path": [
+    "data/external/events/sample_market_events.csv"
+  ],
+  "related_assets_enabled": true,
+  "git_commit": "c2beffc",
+  "metrics": {
+    "train_loss": 1.74937647155353,
+    "validation_loss": 2.079122871160507,
+    "epochs_ran": 5,
+    "n_train": 3584,
+    "n_val": 768,
+    "n_test": 768
+  },
+  "notes": null,
+  "status": "available",
+  "deep_config": {
+    "price_feature_dim": 23,
+    "cross_asset_dim": 6,
+    "event_context_dim": 13,
+    "static_dim": 4,
+    "horizon": 45,
+    "hidden_dim": 48,
+    "dropout": 0.1
+  }
+}

@@ -23,14 +23,23 @@ def backtests(symbol: str = Query(default=None), interval: str = Query(default=N
         output_dir / f"{requested_symbol}_{requested_interval}_summary.csv",
         output_dir / f"{requested_symbol}_summary.csv",
     ]
+    availability_candidates = [
+        output_dir / f"{requested_symbol}_{requested_interval}_model_availability.csv",
+        output_dir / "latest_model_availability.csv",
+    ]
 
     for path in candidates:
         if path.exists():
             frame = pd.read_csv(path)
+            availability_path = next((candidate for candidate in availability_candidates if candidate.exists()), None)
+            availability = pd.read_csv(availability_path).to_dict(orient="records") if availability_path else []
             return {
                 "status": "available",
                 "path": str(path.relative_to(PROJECT_DIR)),
                 "rows": len(frame),
                 "leaderboard": frame.head(25).to_dict(orient="records"),
+                "model_availability": availability,
             }
-    return {"status": "missing", "path": None, "rows": 0, "leaderboard": []}
+    availability_path = next((candidate for candidate in availability_candidates if candidate.exists()), None)
+    availability = pd.read_csv(availability_path).to_dict(orient="records") if availability_path else []
+    return {"status": "missing", "path": None, "rows": 0, "leaderboard": [], "model_availability": availability}

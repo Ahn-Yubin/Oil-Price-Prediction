@@ -14,6 +14,7 @@ data/external/*
 !data/external/events/**
 outputs/*
 artifacts/models/*
+artifacts/smoke/models/*
 *.pyc
 .DS_Store
 *.joblib
@@ -22,6 +23,7 @@ artifacts/models/*
 !data/**/.gitkeep
 !outputs/**/.gitkeep
 !artifacts/models/.gitkeep
+!artifacts/smoke/models/.gitkeep
 !artifacts/metadata/.gitkeep
 !.env.example
 _archive/**/.venv/

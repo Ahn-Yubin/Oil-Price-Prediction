@@ -10,8 +10,8 @@ import pandas as pd
 from market_ai.config import Settings, get_settings
 from market_ai.constants import INTERVAL_TO_HORIZON
 from market_ai.data.event_providers import FileEventProvider
+from market_ai.modeling.deep.availability import deep_artifact_availability
 from market_ai.modeling.deep.inference import predict_deep_quantiles
-from market_ai.modeling.registry import ModelArtifactNotFound, ModelRegistry
 
 
 DEEP_COLORS = {
@@ -49,8 +49,12 @@ def _frame_from_close(close: np.ndarray) -> pd.DataFrame:
 @lru_cache(maxsize=16)
 def _resolve_artifact_path(model_name: str, interval: str, horizon: int, model_dir: str, metadata_dir: str) -> Path:
     settings = get_settings().model_copy(update={"model_dir": Path(model_dir), "metadata_dir": Path(metadata_dir)})
-    metadata = ModelRegistry(settings).resolve(model_name=model_name, interval=interval, horizon=horizon)
-    return Path(settings.model_dir) / metadata.artifact_file
+    availability = deep_artifact_availability(settings=settings, model_name=model_name, interval=interval, horizon=horizon)
+    if not availability.is_available:
+        action = f"Run: {availability.training_command}"
+        detail = availability.reason or f"Missing artifact file: {availability.expected_artifact_file}"
+        raise DeepModelUnavailable(f"{detail} {action}")
+    return availability.artifact_path
 
 
 def forecast_with_deep_model(
@@ -67,7 +71,9 @@ def forecast_with_deep_model(
     model_horizon = int(horizon or INTERVAL_TO_HORIZON.get(interval, 45))
     try:
         artifact_path = _resolve_artifact_path(model_name, interval, model_horizon, str(settings.model_dir), str(settings.metadata_dir))
-    except ModelArtifactNotFound as exc:
+    except DeepModelUnavailable:
+        raise
+    except Exception as exc:
         raise DeepModelUnavailable(str(exc)) from exc
     frame = candles if candles is not None else _frame_from_close(close)
     try:

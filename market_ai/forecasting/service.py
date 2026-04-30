@@ -17,14 +17,16 @@ from market_ai.constants import (
     INTERVAL_TO_RETURN_CLIP,
 )
 from market_ai.modeling.forecasters.baselines import BASELINE_FORECASTERS, ForecastContext
+from market_ai.modeling.deep.availability import DeepArtifactAvailability, deep_artifact_availability
 from market_ai.modeling.forecasters.deep_fusion import DeepModelUnavailable, forecast_with_deep_model
 from market_ai.modeling.forecasters.neural_npz import PretrainedModelNotFoundError
 from market_ai.modeling.forecasters.motif import forecast_model_comparison
-from market_ai.modeling.model_catalog import DEEP_MODELS, USER_FACING_MODELS, InvalidModelRequest, resolve_model_selection
+from market_ai.modeling.model_catalog import DEEP_MODELS, USER_FACING_MODELS, InvalidModelRequest, resolve_model_selection, split_model_query
 from market_ai.schemas.market import (
     DataStatusKind,
     ForecastPoint,
     ForecastResponse,
+    ForecastWarning,
     MarketDataWindow,
     ModelInfo,
     RegimeProbabilities,
@@ -233,6 +235,34 @@ def _baseline_comparison_models(close: np.ndarray, interval: str, horizon: int) 
     return out
 
 
+def _add_warning(
+    *,
+    warnings: list[str],
+    warning_objects: list[ForecastWarning],
+    code: str,
+    severity: str,
+    message: str,
+    action: str | None = None,
+) -> None:
+    warnings.append(message)
+    warning_objects.append(ForecastWarning(code=code, severity=severity, message=message, action=action))
+
+
+def _deep_availability_by_model(settings: Settings, interval: str, horizon: int) -> dict[str, DeepArtifactAvailability]:
+    return {
+        model_name: deep_artifact_availability(settings=settings, model_name=model_name, interval=interval, horizon=horizon)
+        for model_name in DEEP_MODELS
+    }
+
+
+def _default_models_for_artifacts(availabilities: dict[str, DeepArtifactAvailability]) -> tuple[str, ...]:
+    return tuple(
+        model_name
+        for model_name in USER_FACING_MODELS
+        if model_name not in DEEP_MODELS or availabilities[model_name].is_available
+    )
+
+
 def _candle_frame_from_market(market: MarketDataWindow) -> pd.DataFrame:
     return pd.DataFrame([candle.model_dump() for candle in market.candles]).assign(
         date=lambda frame: pd.to_datetime(frame["time"], unit="s", utc=True)
@@ -248,8 +278,11 @@ def _deep_comparison_models(
     selected: list[str],
     settings: Settings,
     warnings: list[str],
+    warning_objects: list[ForecastWarning],
     artifact_status: dict[str, str],
+    availabilities: dict[str, DeepArtifactAvailability],
     deep_model_info: dict[str, Any],
+    explicit_request: bool,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     frame = _candle_frame_from_market(market)
@@ -267,8 +300,24 @@ def _deep_comparison_models(
                 candles=frame,
             )
         except DeepModelUnavailable as exc:
-            artifact_status[model_name] = "missing_or_unavailable"
-            warnings.append(f"{model_name} artifact unavailable; falling back to available non-deep models. Detail: {exc}")
+            availability = availabilities.get(model_name)
+            artifact_status[model_name] = availability.status if availability is not None else "unavailable"
+            should_warn = explicit_request or (availability is not None and availability.is_available)
+            if should_warn:
+                action = availability.training_command if availability is not None else None
+                expected = availability.expected_artifact_file if availability is not None else "expected deep artifact"
+                message = (
+                    f"{model_name} artifact unavailable for {interval}/horizon {horizon}; "
+                    f"falling back to available non-deep models. Expected {expected}. Detail: {exc}"
+                )
+                _add_warning(
+                    warnings=warnings,
+                    warning_objects=warning_objects,
+                    code="deep_artifact_unavailable",
+                    severity="warning",
+                    message=message,
+                    action=action,
+                )
             continue
         artifact_status[model_name] = "available"
         deep_model_info[model_name] = {
@@ -337,12 +386,7 @@ def build_forecast(
 ) -> ForecastBundle:
     del include_explanation
     settings = settings or get_settings()
-    selection = resolve_model_selection(
-        models,
-        supported=USER_FACING_MODELS,
-        default=USER_FACING_MODELS,
-        allow_removed_as_warning=allow_removed_models_as_warning,
-    )
+    requested_models = split_model_query(models)
     try:
         market = load_market_data_window(symbol, interval, settings=settings)
     except MarketDataUnavailable:
@@ -351,6 +395,14 @@ def build_forecast(
     resolved_interval = market.timeframe.normalized
     model_horizon = INTERVAL_TO_HORIZON.get(resolved_interval, INTERVAL_TO_HORIZON[FALLBACK_INTERVAL])
     output_horizon = model_horizon if horizon is None or horizon <= 0 else min(int(horizon), model_horizon)
+    deep_availabilities = _deep_availability_by_model(settings, resolved_interval, model_horizon)
+    default_models = _default_models_for_artifacts(deep_availabilities)
+    selection = resolve_model_selection(
+        models,
+        supported=USER_FACING_MODELS,
+        default=default_models,
+        allow_removed_as_warning=allow_removed_models_as_warning,
+    )
     close = np.asarray([candle.close for candle in market.candles], dtype=np.float64)
     if len(close) == 0:
         raise ForecastUnavailable("Forecast requires at least one close price.")
@@ -371,20 +423,35 @@ def build_forecast(
 
     if not comparison_models:
         raise ForecastUnavailable("No forecast model output was produced.")
-    warnings = list(selection.warnings)
-    artifact_status: dict[str, str] = {}
+    warnings: list[str] = []
+    warning_objects: list[ForecastWarning] = []
+    for message in selection.warnings:
+        _add_warning(
+            warnings=warnings,
+            warning_objects=warning_objects,
+            code="removed_model_requested",
+            severity="warning",
+            message=message,
+        )
+    artifact_status: dict[str, str] = {
+        model_name: availability.status for model_name, availability in deep_availabilities.items()
+    }
     deep_model_info: dict[str, Any] = {}
+    explicit_deep_request = bool(requested_models) and any(model_name in DEEP_MODELS for model_name in selection.selected)
     comparison_models = (
         _deep_comparison_models(
             close=close,
             interval=resolved_interval,
-            horizon=output_horizon,
+            horizon=model_horizon,
             market=market,
             selected=selection.selected,
             settings=settings,
             warnings=warnings,
+            warning_objects=warning_objects,
             artifact_status=artifact_status,
+            availabilities=deep_availabilities,
             deep_model_info=deep_model_info,
+            explicit_request=explicit_deep_request,
         )
         + comparison_models
         + _baseline_comparison_models(close, resolved_interval, model_horizon)
@@ -429,11 +496,32 @@ def build_forecast(
         data_status=market.data_status.status,
     )
 
-    warnings.extend(market.data_status.warnings)
-    warnings.append("Quantile bands are residual-volatility adapters and are not validated coverage intervals yet.")
+    for message in market.data_status.warnings:
+        _add_warning(
+            warnings=warnings,
+            warning_objects=warning_objects,
+            code="data_status_warning",
+            severity="warning",
+            message=message,
+        )
+    _add_warning(
+        warnings=warnings,
+        warning_objects=warning_objects,
+        code="quantile_bands_uncalibrated",
+        severity="info",
+        message="Quantile bands are residual-volatility adapters and are not validated coverage intervals yet.",
+        action="Run rolling coverage calibration before labeling bands as validated confidence intervals.",
+    )
     status_value = str(market.data_status.status)
     if status_value in {DataStatusKind.mock.value, DataStatusKind.fallback.value, DataStatusKind.stale.value}:
-        warnings.append(f"Data status is {market.data_status.status}; confidence is reduced.")
+        _add_warning(
+            warnings=warnings,
+            warning_objects=warning_objects,
+            code="data_quality_reduced",
+            severity="warning",
+            message=f"Data status is {market.data_status.status}; confidence is reduced.",
+            action="Verify live data availability or explicitly enable development fallback only outside production.",
+        )
 
     forecast_models = []
     for model in comparison_models:
@@ -462,7 +550,13 @@ def build_forecast(
         settings.enable_cross_asset_features,
     )
     if settings.enable_cross_asset_features and cross_asset_context.get("warning"):
-        warnings.append(cross_asset_context["warning"])
+        _add_warning(
+            warnings=warnings,
+            warning_objects=warning_objects,
+            code="cross_asset_context_warning",
+            severity="warning",
+            message=cross_asset_context["warning"],
+        )
     response = ForecastResponse(
         symbol=market.symbol.provider_symbol,
         asset_metadata=metadata,
@@ -479,6 +573,7 @@ def build_forecast(
         models=logical_infos + registry_infos,
         cross_asset_context=cross_asset_context,
         warnings=warnings,
+        warning_objects=warning_objects,
         model_paths=forecast_models,
         selected_models=selection.selected,
         primary_model=str(primary.get("id")),
@@ -505,6 +600,7 @@ def build_forecast(
 
 def chart_payload_from_forecast(bundle: ForecastBundle) -> dict[str, Any]:
     response = bundle.response
+    actionable_warnings = [item.message for item in response.warning_objects if item.severity in {"warning", "error"}]
     candles = [candle.model_dump() for candle in bundle.market_data.candles]
     anchor = {"time": bundle.market_data.candles[-1].time, "value": response.current_price}
     predicted = [anchor] + [{"time": point.time, "value": point.p50} for point in response.forecast]
@@ -527,8 +623,9 @@ def chart_payload_from_forecast(bundle: ForecastBundle) -> dict[str, Any]:
         "updated_at": response.generated_at.isoformat(),
         "data_source": response.data_status.source,
         "data_status": response.data_status.model_dump(),
-        "warning": " ".join(response.warnings) if response.warnings else None,
+        "warning": " ".join(actionable_warnings) if actionable_warnings else None,
         "warnings": response.warnings,
+        "warning_objects": [item.model_dump() for item in response.warning_objects],
         "forecast_horizon": bundle.horizon,
         "selected_models": response.selected_models,
         "primary_model": response.primary_model,

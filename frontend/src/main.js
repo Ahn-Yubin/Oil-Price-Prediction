@@ -17,6 +17,18 @@ let latestPayload = null;
 let predictedByTime = new Map();
 let forecastByTime = new Map();
 let requestVersion = 0;
+let modelCatalog = new Map();
+
+const MODEL_LABELS = {
+  motif: "Motif",
+  pattern_mlp: "Pattern MLP",
+  deep_lstm_tcn_fusion: "Deep LSTM+TCN",
+  llm_context_seq_moe: "LLM Context MoE",
+  random_walk: "Random Walk",
+  drift: "Drift",
+  seasonal_naive: "Seasonal Naive",
+  volatility_scaled_naive: "Vol-Scaled Naive",
+};
 
 function normalizeSymbolText(value) {
   return String(value || "").trim().toUpperCase();
@@ -61,7 +73,7 @@ async function loadData(symbol, interval, models = "") {
     try {
       const body = await response.json();
       if (body && body.detail) {
-        message = String(body.detail);
+        message = typeof body.detail === "string" ? body.detail : body.detail.message || JSON.stringify(body.detail);
       }
     } catch (_err) {
       // ignore parse failure
@@ -94,6 +106,15 @@ function convertForecastToChartPayload(forecast) {
       });
     });
   }
+  const warningObjects = Array.isArray(forecast.warning_objects) ? forecast.warning_objects : [];
+  const warningMessages = warningObjects.length
+    ? warningObjects
+        .filter((item) => ["warning", "error"].includes(String(item.severity || "warning")))
+        .map((item) => item.message)
+    : forecast.warnings || [];
+  const infoMessages = warningObjects
+    .filter((item) => String(item.severity || "warning") === "info")
+    .map((item) => item.message);
   return {
     candles,
     predicted: lineFrom("p50"),
@@ -115,8 +136,10 @@ function convertForecastToChartPayload(forecast) {
     updated_at: forecast.generated_at,
     data_source: forecast.data_status?.source,
     data_status: forecast.data_status,
-    warning: (forecast.warnings || []).join(" "),
+    warning: warningMessages.join(" "),
     warnings: forecast.warnings || [],
+    warning_objects: warningObjects,
+    info_messages: infoMessages,
     forecast_horizon: points.length,
     confidence_level: null,
     asset_metadata: forecast.asset_metadata,
@@ -201,15 +224,73 @@ async function loadExplanation(symbol, interval) {
   }
 }
 
-function setStatus(message) {
+function setStatus(message, severity = "warning") {
   const banner = document.getElementById("status-banner");
   if (!message) {
+    banner.classList.add("hidden");
+    banner.textContent = "";
+    banner.removeAttribute("data-severity");
+    return;
+  }
+  banner.classList.remove("hidden");
+  banner.dataset.severity = severity;
+  banner.textContent = message;
+}
+
+function setInfoMessages(messages) {
+  const banner = document.getElementById("info-banner");
+  if (!banner) return;
+  const values = (messages || []).filter(Boolean);
+  if (!values.length) {
     banner.classList.add("hidden");
     banner.textContent = "";
     return;
   }
   banner.classList.remove("hidden");
-  banner.textContent = message;
+  banner.textContent = values.join(" ");
+}
+
+function setForecastNotices(payload) {
+  setStatus(payload.warning || null, "warning");
+  setInfoMessages(payload.info_messages || []);
+}
+
+async function loadModelCatalog() {
+  const select = document.getElementById("model-input");
+  if (!select) return;
+  try {
+    const response = await fetch(`/api/models?_ts=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("model catalog unavailable");
+    const body = await response.json();
+    modelCatalog = new Map((body.user_facing_models || []).map((item) => [item.id, item]));
+    const current = select.value || "";
+    select.replaceChildren();
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = "Default";
+    select.appendChild(defaultOption);
+    (body.user_facing_models || []).forEach((model) => {
+      const option = document.createElement("option");
+      option.value = model.id;
+      const label = MODEL_LABELS[model.id] || model.id;
+      option.textContent = model.status === "artifact_missing" ? `${label} (Train required)` : label;
+      option.dataset.status = model.status || "available";
+      if (model.training_command) {
+        option.dataset.trainingCommand = model.training_command;
+        option.title = model.training_command;
+      }
+      select.appendChild(option);
+    });
+    select.value = [...select.options].some((option) => option.value === current) ? current : "";
+  } catch (_err) {
+    // Keep static options when the model catalog is unavailable.
+  }
+}
+
+function selectedModelCatalogEntry() {
+  const modelInput = document.getElementById("model-input");
+  const modelId = modelInput ? modelInput.value || "" : "";
+  return modelCatalog.get(modelId) || null;
 }
 
 function toUnixTime(time) {
@@ -626,7 +707,7 @@ async function initDashboard(symbol, interval) {
     );
     setDataStatusBadge(payload.data_status);
     setForecastBadges(payload);
-    setStatus(payload.warning || null);
+    setForecastNotices(payload);
     loadExplanation(symbol, interval);
     try {
       const nextDataKey = `${payload.symbol_input}|${payload.interval_resolved}`;
@@ -643,7 +724,8 @@ async function initDashboard(symbol, interval) {
     if (reqId !== requestVersion) return;
     console.error(error);
     document.getElementById("chart-updated-value").textContent = "Updated -";
-    setStatus(`API 요청 실패: ${error?.message || "서버 로그를 확인하세요."}`);
+    setStatus(`API 요청 실패: ${error?.message || "서버 로그를 확인하세요."}`, "warning");
+    setInfoMessages([]);
   } finally {
     if (reqId === requestVersion && loadBtn) {
       loadBtn.disabled = false;
@@ -661,6 +743,17 @@ function bindControls() {
   const triggerSearch = () => {
     const symbol = (input.value || "NYMEX:CL1!").trim();
     const interval = intervalInput.value || "1d";
+    const catalogEntry = selectedModelCatalogEntry();
+    if (catalogEntry && catalogEntry.status === "artifact_missing") {
+      const label = MODEL_LABELS[catalogEntry.id] || catalogEntry.id;
+      setStatus(
+        `${label} requires training before dashboard use. Command: ${catalogEntry.training_command}`,
+        "warning",
+      );
+      setInfoMessages([]);
+      modelInput.value = "";
+      return;
+    }
     // Force new chart request even for same symbol/interval.
     activeDataKey = null;
     initDashboard(symbol, interval);
@@ -722,9 +815,14 @@ function startAutoRefresh() {
   }, 15_000);
 }
 
-bindControls();
-initDashboard(
-  document.getElementById("symbol-input").value || "NYMEX:CL1!",
-  document.getElementById("interval-input").value || "1d",
-);
-startAutoRefresh();
+async function bootDashboard() {
+  bindControls();
+  await loadModelCatalog();
+  initDashboard(
+    document.getElementById("symbol-input").value || "NYMEX:CL1!",
+    document.getElementById("interval-input").value || "1d",
+  );
+  startAutoRefresh();
+}
+
+bootDashboard();

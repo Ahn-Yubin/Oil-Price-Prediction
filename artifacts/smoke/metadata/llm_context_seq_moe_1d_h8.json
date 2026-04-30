@@ -4,8 +4,8 @@
   "version": "deep_v1",
   "artifact_file": "llm_context_seq_moe_1d_h8.pt",
   "interval": "1d",
-  "created_at": "2026-04-29T19:55:25.645262+00:00",
-  "train_start": null,
+  "created_at": "2026-04-30T03:56:22.195655+00:00",
+  "train_start": "2020-05-04T00:00:00+00:00",
   "train_end": "2020-09-08T00:00:00+00:00",
   "training_cutoff": "2020-09-08T00:00:00+00:00",
   "asset_universe": [
@@ -34,7 +34,7 @@
   "event_context_enabled": true,
   "events_path": [],
   "related_assets_enabled": true,
-  "git_commit": null,
+  "git_commit": "c2beffc",
   "metrics": {
     "train_loss": 2.870368719100952,
     "validation_loss": 1.609143853187561,
@@ -43,7 +43,7 @@
     "n_val": 19,
     "n_test": 19
   },
-  "notes": "Quick-test smoke artifact. Not eligible for dashboard default production inference.",
+  "notes": "Quick-test smoke artifact; not for production inference.",
   "status": "smoke_only",
   "deep_config": {
     "price_feature_dim": 23,

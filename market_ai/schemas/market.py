@@ -181,6 +181,7 @@ class ModelMetadata(BaseModel):
     model_type: str
     version: str = "legacy"
     artifact_file: str
+    interval: str | None = None
     created_at: str | None = None
     train_start: str | None = None
     train_end: str | None = None
@@ -195,9 +196,25 @@ class ModelMetadata(BaseModel):
     scaler: str | None = None
     data_hash: str | None = None
     git_commit: str | None = None
+    n_train: int | None = None
+    n_val: int | None = None
+    n_test: int | None = None
+    data_source: str | None = None
+    synthetic_used: bool | None = None
+    event_context_enabled: bool | None = None
+    events_path: list[str] = Field(default_factory=list)
+    related_assets_enabled: bool | None = None
     metrics: dict[str, Any] = Field(default_factory=dict)
     notes: str | None = None
     status: str = "available"
+    deep_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ForecastWarning(BaseModel):
+    code: str
+    severity: str = "warning"
+    message: str
+    action: str | None = None
 
 
 class ForecastResponse(BaseModel):
@@ -216,6 +233,7 @@ class ForecastResponse(BaseModel):
     models: list[ModelInfo] = Field(default_factory=list)
     cross_asset_context: dict[str, Any] | None = None
     warnings: list[str] = Field(default_factory=list)
+    warning_objects: list[ForecastWarning] = Field(default_factory=list)
     model_paths: list[dict[str, Any]] = Field(default_factory=list)
     selected_models: list[str] = Field(default_factory=list)
     primary_model: str | None = None

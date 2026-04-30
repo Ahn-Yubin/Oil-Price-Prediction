@@ -1,8 +1,12 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 
 from market_ai.forecasting import service
+from market_ai.modeling.deep.availability import DeepArtifactAvailability
+from market_ai.modeling.forecasters.deep_fusion import DeepModelUnavailable
+from market_ai.modeling.model_catalog import DEEP_MODELS
 from market_ai.schemas.market import AssetClass, Candle, DataStatus, MarketDataWindow, MarketSymbol, Timeframe
 
 
@@ -40,6 +44,25 @@ def _comparison(close, interval, horizon, z_value, return_clip, max_log_band):
     )
 
 
+def _missing_deep_availability(settings, interval, horizon):
+    return {
+        name: DeepArtifactAvailability(
+            model_name=name,
+            interval=interval,
+            horizon=horizon,
+            status="artifact_missing",
+            expected_artifact_file=f"{name}_{interval}_h{horizon}.pt",
+            expected_metadata_file=f"{name}_{interval}_h{horizon}.json",
+            artifact_path=Path("artifacts/models") / f"{name}_{interval}_h{horizon}.pt",
+            metadata_path=Path("artifacts/metadata") / f"{name}_{interval}_h{horizon}.json",
+            training_command=f"python scripts/train/train_deep_fusion_models.py --model {name} --interval {interval}",
+            metadata={},
+            reason="missing test artifact",
+        )
+        for name in DEEP_MODELS
+    }
+
+
 def test_forecast_models_query_selects_requested_model(monkeypatch):
     monkeypatch.setattr(service, "load_market_data_window", lambda *args, **kwargs: _market_window())
     monkeypatch.setattr(service, "forecast_model_comparison", _comparison)
@@ -52,7 +75,26 @@ def test_forecast_models_query_selects_requested_model(monkeypatch):
 def test_forecast_deep_request_falls_back_when_artifact_missing(monkeypatch):
     monkeypatch.setattr(service, "load_market_data_window", lambda *args, **kwargs: _market_window())
     monkeypatch.setattr(service, "forecast_model_comparison", _comparison)
+    monkeypatch.setattr(service, "_deep_availability_by_model", _missing_deep_availability)
+    monkeypatch.setattr(
+        service,
+        "forecast_with_deep_model",
+        lambda **kwargs: (_ for _ in ()).throw(DeepModelUnavailable("missing test artifact")),
+    )
     bundle = service.build_forecast(symbol="CL=F", interval="1d", models="deep_lstm_tcn_fusion", include_scenarios=False)
     assert "deep_lstm_tcn_fusion" in bundle.response.selected_models
-    assert bundle.response.artifact_status["deep_lstm_tcn_fusion"] == "missing_or_unavailable"
+    assert bundle.response.artifact_status["deep_lstm_tcn_fusion"] == "artifact_missing"
     assert bundle.response.primary_model == "motif"
+    assert any(item.code == "deep_artifact_unavailable" for item in bundle.response.warning_objects)
+
+
+def test_forecast_default_skips_missing_deep_artifacts_without_warning(monkeypatch):
+    monkeypatch.setattr(service, "load_market_data_window", lambda *args, **kwargs: _market_window())
+    monkeypatch.setattr(service, "forecast_model_comparison", _comparison)
+    monkeypatch.setattr(service, "_deep_availability_by_model", _missing_deep_availability)
+    bundle = service.build_forecast(symbol="CL=F", interval="1d", include_scenarios=False)
+    assert "deep_lstm_tcn_fusion" not in bundle.response.selected_models
+    assert "llm_context_seq_moe" not in bundle.response.selected_models
+    assert bundle.response.artifact_status["deep_lstm_tcn_fusion"] == "artifact_missing"
+    assert not any(item.code == "deep_artifact_unavailable" for item in bundle.response.warning_objects)
+    assert any(item.code == "quantile_bands_uncalibrated" and item.severity == "info" for item in bundle.response.warning_objects)
