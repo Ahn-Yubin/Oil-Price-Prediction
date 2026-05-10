@@ -17,6 +17,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from market_ai.env import load_project_env
+
+load_project_env()
+
 from market_ai.config import PROJECT_DIR
 from market_ai.data.deep_dataset import DeepDataset, _time_split_indices, build_deep_dataset_from_frame, build_synthetic_deep_dataset, combine_auxiliary_feature_frames
 from market_ai.data.event_providers import EVENT_FILE_ENV_VARS, FileEventProvider
@@ -223,8 +227,6 @@ def build_dataset(args: argparse.Namespace, symbols: list[str], config: DeepData
             "synthetic_used": True,
             "events_path": event_paths,
         }
-    from market_ai.data.deep_dataset import DeepDataset, _time_split_indices
-
     train_idx, val_idx, test_idx = _time_split_indices(len(samples), config.validation_ratio, config.test_ratio)
     return DeepDataset(samples=samples, train_indices=train_idx, validation_indices=val_idx, test_indices=test_idx), {
         "source": "yfinance",

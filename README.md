@@ -1,99 +1,160 @@
 # Universal Market Forecasting Dashboard
 
-이 프로젝트는 **Universal Market Forecasting Dashboard, oil as first use case**입니다. 현재 유가 예측은 첫 번째 use case이며, 최종 목표는 가격 데이터, 시계열 모델, LLM context encoder, TradingView overlay를 갖춘 범용 시장 AI 플랫폼입니다.
+이 프로젝트는 유가 dashboard에서 시작해 범용 시장 예측 플랫폼으로 확장 중인 FastAPI + market_ai + frontend 저장소입니다. 현재 첫 use case는 원유/에너지 시장이며, 목표는 가격 데이터, fundamental 데이터, 뉴스/LLM context, 딥러닝 예측, chart overlay를 하나의 운영 흐름으로 묶는 것입니다.
 
-영어 문서는 [README.en.md](README.en.md)를 참고하십시오.
+영어 문서는 [README.en.md](README.en.md)를 참고하십시오. 처음 보는 팀원은 [프로젝트 현황](docs/ko/PROJECT_STATUS.md)을 먼저 읽으십시오.
 
-처음 보는 팀원은 [프로젝트 현황](docs/ko/PROJECT_STATUS.md)을 먼저 읽으십시오. 폴더별 역할, 현재 구현 범위, LLM/모델/백테스트/차트 예측선 흐름, 다음 작업 순서를 한 문서에 정리했습니다.
+## 핵심 원칙
 
-## 실행 방법
+- Production에서 mock/synthetic 데이터를 조용히 사용하지 않습니다.
+- `/api/chart` backward compatibility를 유지합니다.
+- LLM은 context/event encoder입니다. 숫자 가격 예측기는 아닙니다.
+- Forecast target은 volatility-scaled cumulative log return distribution입니다.
+- 예측 가격은 `price_t+h = current_price * exp(predicted_cumulative_log_return_h)`로 복원합니다.
+- `.pt`/`.npz` artifact는 `artifacts/models`, metadata JSON은 `artifacts/metadata`에 둡니다.
+- 한국어 문서와 영어 mirror는 같은 상대경로 구조를 유지합니다.
+
+## 빠른 실행
 
 ```bash
-uvicorn backend.app.main:app --reload --port 8000
-python scripts/train/train_pretrained_models.py --interval 1d
-python scripts/train/train_deep_fusion_models.py --model both --interval 1d --universe oil_core --epochs 10 --batch-size 64
-python scripts/train/train_deep_fusion_models.py --model deep_lstm_tcn_fusion --interval 1d --quick-test --epochs 1 --max-samples 256
-python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
-python scripts/data/build_event_context.py --events-path data/external/events/sample_market_events.csv --mode local_rules
-python scripts/data/build_data_inventory.py
-python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
-python scripts/evaluate/run_model_leaderboard.py --symbols CL=F,BZ=F,NG=F --interval 1d --max-origins 50
-python scripts/maintenance/check_docs_i18n.py
-python scripts/maintenance/smoke_test_api.py
+.venv/bin/python -m uvicorn backend.app.main:app --reload --port 8000
 ```
 
-로컬 shell에 `python`이 없으면 `.venv/bin/python`을 사용하십시오.
-
-## 환경변수
-
-- `APP_ENV`: runtime 환경입니다. production에서는 mock fallback을 조용히 사용하지 않습니다.
-- `ALLOW_MOCK_DATA`: development fallback 허용 여부입니다. 기본 예시는 `false`입니다.
-- `MODEL_DIR`: `.npz` 모델 artifact 위치입니다. 기본값은 `artifacts/models`입니다.
-- `METADATA_DIR`: model metadata JSON 위치입니다. 기본값은 `artifacts/metadata`입니다.
-- `DATA_DIR`: runtime data 위치입니다. 기본값은 `data`입니다.
-- `DEFAULT_SYMBOL`, `DEFAULT_INTERVAL`: 기본 symbol과 interval입니다.
-- `ENABLE_LLM_CONTEXT`, `LLM_CONTEXT_MODE`, `LLM_API_KEY`, `LLM_API_BASE`, `LLM_MODEL`: LLM context encoder 설정입니다.
-- `ENABLE_EXTERNAL_LLM_CALLS`: 외부 LLM 호출 허용 여부입니다. 기본값은 `false`입니다.
-- `LOCAL_LLM_API_BASE`, `LOCAL_LLM_MODEL`: local HTTP LLM endpoint 설정입니다.
-- `NEWS_EVENTS_PATH`, `ECONOMIC_EVENTS_PATH`, `MARKET_EVENTS_PATH`: deterministic event context 파일 경로입니다.
-
-## API
-
-주요 endpoint는 다음과 같습니다.
+주요 API:
 
 - `GET /api/health`
 - `GET /api/models`
 - `GET /api/data-status?symbol=CL=F&interval=1d`
 - `GET /api/forecast?symbol=CL=F&interval=1d`
 - `GET /api/chart?symbol=CL=F&interval=1d`
-- `GET /api/features`
+- `GET /api/market-context?symbol=NYMEX:CL1%21&interval=1d`
 - `GET /api/explanation`
 - `GET /api/backtests`
 
-`GET /api/chart`는 기존 frontend와의 backward compatibility를 유지합니다. 신규 통합은 `GET /api/forecast`를 우선 사용하십시오.
+## 현재 데이터 상태
 
-## 모델 구조
+현재 학습에 사용할 수 있는 데이터는 다음과 같습니다.
 
-숫자 예측은 LLM이 아니라 시계열 모델과 baseline이 담당합니다. Forecast target은 volatility-scaled cumulative log return distribution 구조를 유지하며, 예측 가격은 `current_price * exp(cumulative_log_return_h)`로 복원합니다.
+- `data/processed/market_panel/{interval}/panel.csv`: `1d`, `1h`, `30m`, `15m` market panel
+- `data/processed/oil_fundamentals/eia_weekly.csv`: EIA weekly petroleum 데이터
+- `data/processed/oil_fundamentals/cftc_cot_weekly.csv`: CFTC COT weekly 포지셔닝 데이터
+- `data/raw/news/public_market_news.csv`: 공개 뉴스 원문
+- `data/processed/event_context/event_context_daily.csv`: 뉴스/이벤트 context vector
+- `data/manifests/data_inventory.json`: 데이터 inventory
 
-최종 모델 분류는 다음과 같습니다.
+제한 사항은 CME futures curve 장기 데이터, 더 긴 뉴스 history, 충분한 calibration residual입니다. 자세한 내용은 [데이터 파이프라인](docs/ko/DATA_PIPELINE.md)을 참고하십시오.
 
-- Classical: `motif`
-- Deep learning: `pattern_mlp`, `deep_lstm_tcn_fusion`, `llm_context_seq_moe`
-- Baselines: `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive`
-- Backtest-only: `flat`, `simple_moving_average_path`, optional `regime_ensemble`
-- Removed/deprecated: `cycle`, `lstm`, `tcn`, `ensemble`
+## LLM Context
 
-`cycle` standalone 모델은 제거하고 cycle 정보는 feature로 사용합니다. 기존 live LSTM/TCN은 artifact 기반 `deep_lstm_tcn_fusion` encoder로 대체했습니다. Fixed ensemble은 LLM/event context가 gating에만 영향을 주는 `llm_context_seq_moe`로 대체합니다.
+LLM 사용 흐름은 다음과 같습니다.
 
-`.npz`와 `.pt` 모델 가중치는 `artifacts/models`에 두고, metadata JSON은 `artifacts/metadata`에 둡니다. Source code와 artifact를 섞지 않습니다. Artifact가 없으면 API는 warning과 `artifact_status`를 반환하고 가능한 fallback 모델을 사용합니다.
-
-## 백테스트
-
-Backtest CLI는 `scripts/backtest/run_backtest.py`입니다. 재사용 가능한 로직은 `market_ai/backtesting`에 있습니다.
-
-```bash
-python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
+```text
+뉴스/이벤트 -> LLM context encoder -> event context vector -> 딥러닝 모델 입력 -> 시계열 모델이 숫자 예측
 ```
 
-## 실전 데이터와 학습 순서
+Google Gemma hosted API를 쓸 때:
 
-1. `scripts/data/fetch_market_prices.py`로 yfinance market panel을 저장합니다.
-2. `scripts/data/fetch_eia_petroleum.py`, `fetch_cftc_cot.py`, `fetch_cme_settlements.py`로 API 또는 manual CSV fundamental 데이터를 point-in-time processed dataset으로 만듭니다.
-3. `scripts/data/build_event_context.py`로 event/news/LLM context daily dataset을 생성합니다.
-4. `scripts/train/train_deep_fusion_models.py --use-processed-data ...`로 `deep_lstm_tcn_fusion`과 `llm_context_seq_moe`를 재학습합니다.
-5. `scripts/evaluate/run_model_leaderboard.py`와 `scripts/evaluate/calibrate_quantiles.py`로 leaderboard와 calibration artifact를 만듭니다.
+```bash
+export ENABLE_LLM_CONTEXT=true
+export ENABLE_EXTERNAL_LLM_CALLS=true
+export LLM_CONTEXT_MODE=google_generative
+export LLM_API_KEY="YOUR_GOOGLE_API_KEY"
+export LLM_API_BASE="https://generativelanguage.googleapis.com/v1beta"
+export LLM_MODEL="gemma-3-27b-it"
+```
 
-대용량 `.pt`/`.npz` artifact는 Git에서 제외될 수 있지만, metadata JSON, data manifest, calibration manifest는 재현성을 위해 관리합니다.
+`export`는 현재 shell에만 남습니다. 터미널을 닫으면 사라집니다. 프로젝트별 지속 설정은 `.env`를 사용합니다. 이 저장소의 주요 server/script entrypoint는 프로젝트 루트 `.env`를 자동 로드합니다.
 
-## LLM Context Encoder
+```bash
+cp .env.example .env
+```
 
-LLM은 숫자 가격 예측기가 아닙니다. LLM은 뉴스, 이벤트, 거시 맥락을 구조화된 context로 encode하고 설명을 생성하는 용도로만 사용합니다. LLM 기능이 꺼져 있어도 API와 dashboard는 동작해야 합니다.
+shell의 `echo "$LLM_MODEL"`은 `.env`를 자동으로 보여주지 않습니다. 프로젝트가 읽는 설정은 Python으로 확인합니다.
 
-## TradingView Overlay
+```bash
+.venv/bin/python - <<'PY'
+from market_ai.config import get_settings
+s = get_settings()
+print("enable_llm_context:", s.enable_llm_context)
+print("enable_external_llm_calls:", s.enable_external_llm_calls)
+print("llm_model:", s.llm_model)
+print("llm_api_base:", s.llm_api_base)
+print("llm_api_key_set:", bool(s.llm_api_key))
+PY
+```
 
-Frontend는 `frontend/`에 있으며 TradingView Lightweight Charts 스타일 overlay를 제공합니다. 현재 UI는 `/api/forecast`를 우선 시도하고 필요하면 `/api/chart` 호환 payload를 사용합니다.
+연결 검증:
 
-## 문서 정책
+```bash
+.venv/bin/python scripts/llm/test_llm_context.py --mode openai_compatible --dry-run
+.venv/bin/python scripts/llm/test_llm_context.py --mode google_generative --live
+```
 
-문서 정책은 **한국어 원본 + 영어 미러**입니다. `docs/ko`와 `docs/en`은 같은 상대경로 구조를 유지해야 하며, `scripts/maintenance/check_docs_i18n.py`로 검증합니다.
+자세한 설명은 [LLM Context](docs/ko/LLM_CONTEXT.md)를 참고하십시오.
+
+## 데이터 구축
+
+```bash
+.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1d --period 10y
+.venv/bin/python scripts/data/fetch_eia_petroleum.py
+.venv/bin/python scripts/data/fetch_cftc_cot.py
+.venv/bin/python scripts/data/build_event_context.py --news-path data/raw/news/public_market_news.csv --symbols CL=F,BZ=F,NG=F --mode local_rules
+.venv/bin/python scripts/data/build_data_inventory.py
+```
+
+공개 데이터 orchestration:
+
+```bash
+.venv/bin/python scripts/data/build_real_dataset.py \
+  --universe research_core \
+  --interval 1d \
+  --period 10y \
+  --news-timespan 3m \
+  --news-maxrecords 30
+```
+
+## 학습
+
+현재 processed data를 사용한 deep model 학습:
+
+```bash
+.venv/bin/python scripts/train/train_deep_fusion_models.py \
+  --model both \
+  --interval 1d \
+  --horizon 8 \
+  --lookback 128 \
+  --universe research_core \
+  --use-processed-data \
+  --market-panel data/processed/market_panel/1d/panel.csv \
+  --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
+  --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
+  --event-context data/processed/event_context/event_context_daily.csv \
+  --max-samples 512 \
+  --epochs 3 \
+  --batch-size 64 \
+  --device mps \
+  --force
+```
+
+`llm_context_seq_moe`는 `event_context_daily.csv`를 입력으로 사용합니다. `deep_lstm_tcn_fusion`은 같은 processed price/fundamental 데이터로 학습할 수 있습니다.
+
+## 검증
+
+```bash
+.venv/bin/python -m pytest tests/integration/test_api.py tests/unit/test_real_data_pipeline.py tests/unit/test_deep_dataset.py tests/unit/test_train_deep_fusion_cli_policy.py
+.venv/bin/python -m compileall backend market_ai scripts
+.venv/bin/python scripts/maintenance/check_docs_i18n.py --check-legacy
+```
+
+## 문서
+
+- [프로젝트 현황](docs/ko/PROJECT_STATUS.md)
+- [아키텍처](docs/ko/ARCHITECTURE.md)
+- [API](docs/ko/API.md)
+- [데이터 파이프라인](docs/ko/DATA_PIPELINE.md)
+- [모델 설계](docs/ko/MODEL_DESIGN.md)
+- [LLM Context](docs/ko/LLM_CONTEXT.md)
+- [운영](docs/ko/OPERATIONS.md)
+- [프론트엔드](docs/ko/FRONTEND.md)
+- [백테스트](docs/ko/BACKTESTING.md)
+- [로드맵](docs/ko/ROADMAP.md)

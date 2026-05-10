@@ -1,95 +1,210 @@
 # Operations
 
-Operations docs collect repeated commands and environment settings for developers and operators.
+This document covers repeated commands, environment variables, data builds, training, validation, and server operation. If the local shell has no `python`, use `.venv/bin/python` for all commands.
 
 ## Server
 
 ```bash
-uvicorn backend.app.main:app --reload --port 8000
+.venv/bin/python -m uvicorn backend.app.main:app --reload --port 8000
 ```
 
-The old `app.main:app` is a compatibility wrapper. New docs and operations commands should use `backend.app.main:app`.
+The old `app.main:app` remains a compatibility wrapper. New operational commands should use `backend.app.main:app`.
 
-## Training
+Environment changes are not automatically applied to an already running server. Restart the server after changing LLM keys, model names, or data paths.
 
-Legacy `.npz` fallback:
+## export And .env
+
+`export` only affects the current terminal session and child processes started from that session. It disappears when the terminal closes and is not shared with other terminals.
+
+Check the current shell:
 
 ```bash
-python scripts/train/train_pretrained_models.py --interval 1d
+echo "$ENABLE_LLM_CONTEXT"
+echo "$ENABLE_EXTERNAL_LLM_CALLS"
+echo "$LLM_CONTEXT_MODE"
+echo "$LLM_API_BASE"
+echo "$LLM_MODEL"
+test -n "$LLM_API_KEY" && echo "LLM_API_KEY is set" || echo "LLM_API_KEY is missing"
 ```
 
-Deep models:
+There are two persistence options.
+
+1. Put exports in `~/.zshrc` for personal shell defaults.
+2. Create a project `.env`. The main server/script entrypoints auto-load the project-root `.env`.
 
 ```bash
-python scripts/train/train_deep_fusion_models.py --model both --interval 1d --universe oil_core --epochs 10 --batch-size 64
-python scripts/train/train_deep_fusion_models.py --model deep_lstm_tcn_fusion --interval 1d --quick-test --epochs 1 --max-samples 256
+cp .env.example .env
+# edit LLM_API_KEY and LLM_MODEL inside .env
 ```
 
-Artifacts are saved in `artifacts/models`, and metadata JSON is saved in `artifacts/metadata`.
+`.env` and `.env.*` are ignored by Git. Still, never print or commit API keys.
 
-Real processed-data training:
+Shell commands such as `echo "$LLM_MODEL"` do not automatically show `.env` values. Check the settings read by the project with Python:
 
 ```bash
-python scripts/train/train_deep_fusion_models.py \
-  --model both \
-  --interval 1d \
-  --universe oil_core \
-  --use-processed-data \
-  --market-panel data/processed/market_panel/1d/panel.parquet \
-  --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
-  --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
-  --cme-curve data/processed/oil_fundamentals/cme_curve_daily.csv \
-  --event-context data/processed/event_context/event_context_daily.csv \
-  --epochs 30 \
-  --batch-size 64 \
-  --force
+.venv/bin/python - <<'PY'
+from market_ai.config import get_settings
+s = get_settings()
+print("enable_llm_context:", s.enable_llm_context)
+print("enable_external_llm_calls:", s.enable_external_llm_calls)
+print("llm_model:", s.llm_model)
+print("llm_api_base:", s.llm_api_base)
+print("llm_api_key_set:", bool(s.llm_api_key))
+PY
 ```
 
-If `panel.parquet` is absent and `panel.csv` exists, the loader reads the CSV fallback. Production training does not use synthetic fallback unless `--synthetic`, `--quick-test`, or `--allow-synthetic-fallback` is explicit.
+## Google Gemma/Gemini LLM Context
+
+Example for Google's OpenAI-compatible endpoint:
+
+```bash
+export ENABLE_LLM_CONTEXT=true
+export ENABLE_EXTERNAL_LLM_CALLS=true
+export LLM_CONTEXT_MODE=google_generative
+export LLM_API_KEY="YOUR_GOOGLE_API_KEY"
+export LLM_API_BASE="https://generativelanguage.googleapis.com/v1beta"
+export LLM_MODEL="gemma-3-27b-it"
+```
+
+Dry-run:
+
+```bash
+.venv/bin/python scripts/llm/test_llm_context.py --mode openai_compatible --dry-run
+```
+
+Live call:
+
+```bash
+.venv/bin/python scripts/llm/test_llm_context.py --mode google_generative --live
+```
+
+Success means `safety_check_passed=true` and no `External LLM fallback` warning.
 
 ## Data Build
 
-```bash
-python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
-python scripts/data/fetch_eia_petroleum.py --manual-csv path/to/eia.csv
-python scripts/data/fetch_cftc_cot.py --manual-csv path/to/cftc.csv
-python scripts/data/fetch_cme_settlements.py --manual-csv path/to/cme.csv
-python scripts/data/build_event_context.py --events-path data/external/events/sample_market_events.csv --mode local_rules
-python scripts/data/build_data_inventory.py
-```
-
-API keys and secrets must be injected through `.env` or shell environment variables and must not be committed.
-
-## Backtesting
+Market panel:
 
 ```bash
-python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --no-plots
+.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1d --period 10y
+.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1h --period 730d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 30m --period 60d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 15m --period 60d
 ```
 
-If a deep artifact is missing, that model is recorded as unavailable and the overall backtest continues.
+Oil fundamentals and positioning:
+
+```bash
+.venv/bin/python scripts/data/fetch_eia_petroleum.py
+.venv/bin/python scripts/data/fetch_cftc_cot.py
+.venv/bin/python scripts/data/fetch_cme_settlements.py --manual-csv data/external/fundamentals/cme_settlements.csv
+```
+
+Event context:
+
+```bash
+.venv/bin/python scripts/data/build_event_context.py \
+  --news-path data/raw/news/public_market_news.csv \
+  --symbols CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F,DX-Y.NYB,EURUSD=X,USDKRW=X,JPY=X,SPY,QQQ,^GSPC,^VIX,XLE,USO \
+  --mode google_generative \
+  --live
+```
+
+Manifest:
+
+```bash
+.venv/bin/python scripts/data/build_data_inventory.py
+```
+
+## Training
+
+One-day training with current processed data:
+
+```bash
+.venv/bin/python scripts/train/train_deep_fusion_models.py \
+  --model both \
+  --interval 1d \
+  --horizon 8 \
+  --lookback 128 \
+  --universe research_core \
+  --use-processed-data \
+  --market-panel data/processed/market_panel/1d/panel.csv \
+  --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
+  --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
+  --event-context data/processed/event_context/event_context_daily.csv \
+  --max-samples 512 \
+  --epochs 3 \
+  --batch-size 64 \
+  --device mps \
+  --force
+```
+
+Longer horizon artifact:
+
+```bash
+.venv/bin/python scripts/train/train_deep_fusion_models.py \
+  --model both \
+  --interval 1d \
+  --horizon 45 \
+  --lookback 128 \
+  --universe research_core \
+  --use-processed-data \
+  --market-panel data/processed/market_panel/1d/panel.csv \
+  --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
+  --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
+  --event-context data/processed/event_context/event_context_daily.csv \
+  --max-samples 512 \
+  --epochs 3 \
+  --batch-size 64 \
+  --device mps \
+  --force
+```
+
+Production training does not use synthetic fallback unless `--synthetic`, `--quick-test`, or `--allow-synthetic-fallback` is explicit. Artifacts are stored in `artifacts/models`; metadata JSON is stored in `artifacts/metadata`.
+
+## Backtest And Calibration
+
+```bash
+.venv/bin/python scripts/backtest/run_backtest.py \
+  --symbol CL=F \
+  --interval 1d \
+  --max-origins 10 \
+  --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe \
+  --no-plots
+```
 
 Leaderboard and calibration:
 
 ```bash
-python scripts/evaluate/run_model_leaderboard.py --symbols CL=F,BZ=F,NG=F --interval 1d --max-origins 50
-python scripts/evaluate/calibrate_quantiles.py --model motif --symbol CL=F --interval 1d
+.venv/bin/python scripts/evaluate/run_model_leaderboard.py --symbols CL=F,BZ=F,NG=F --interval 1d --max-origins 50
+.venv/bin/python scripts/evaluate/calibrate_quantiles.py --model motif --symbol CL=F --interval 1d
 ```
 
-## API and Chart
+Until calibration artifacts are sufficiently validated, forecast bands are residual-volatility adapters, not validated confidence intervals.
 
-Pass model selection with `/api/forecast?symbol=CL=F&interval=1d&models=deep_lstm_tcn_fusion`. The frontend model selector sends the same query. The `/api/chart` schema remains backward compatible.
+## API And Chart
 
-## Maintenance
+- `/api/forecast`: new forecast contract
+- `/api/chart`: legacy chart compatibility contract
+- `/api/market-context`: news, context markers, and model scenario commentary
+
+Example:
 
 ```bash
-python scripts/maintenance/check_docs_i18n.py --check-legacy
-python -m compileall backend market_ai scripts
-python scripts/maintenance/smoke_test_api.py
-python -m pytest
+curl "http://127.0.0.1:8000/api/market-context?symbol=NYMEX:CL1%21&interval=1d&models=llm_context_seq_moe"
 ```
 
-If `python` is unavailable in the local shell, use `.venv/bin/python`.
+## Validation
 
-## Default Paths
+```bash
+.venv/bin/python -m pytest tests/integration/test_api.py tests/unit/test_real_data_pipeline.py tests/unit/test_deep_dataset.py tests/unit/test_train_deep_fusion_cli_policy.py
+.venv/bin/python -m compileall backend market_ai scripts
+.venv/bin/python scripts/maintenance/check_docs_i18n.py --check-legacy
+```
 
-Unless overridden, use `MODEL_DIR=artifacts/models`, `METADATA_DIR=artifacts/metadata`, and `DATA_DIR=data`.
+Frontend JS syntax:
+
+```bash
+node --check frontend/src/main.js
+```
+
+If `npm` is not in PATH, Vite build cannot be run. If the Node runtime is located elsewhere, run `--check` with that `node` binary.

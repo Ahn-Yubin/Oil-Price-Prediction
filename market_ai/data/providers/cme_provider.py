@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import urllib.request
+from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 from market_ai.data.storage import read_table
 
@@ -91,6 +92,21 @@ def load_cme_manual_csv(path: str | Path) -> pd.DataFrame:
 def fetch_cme_csv(url: str) -> pd.DataFrame:
     if not url:
         raise RuntimeError("CME provider URL is required; pass --manual-csv for licensed/manual data.")
-    with urllib.request.urlopen(url, timeout=30) as response:
-        frame = pd.read_csv(response)
+    response = requests.get(
+        url,
+        headers={"User-Agent": "market-ai-data-collector/1.0"},
+        timeout=60,
+        verify=_requests_verify(),
+    )
+    response.raise_for_status()
+    frame = pd.read_csv(BytesIO(response.content))
     return normalize_cme_settlements_frame(frame)
+
+
+def _requests_verify() -> str | bool:
+    try:
+        import certifi
+
+        return certifi.where()
+    except Exception:
+        return True

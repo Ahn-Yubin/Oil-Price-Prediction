@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import ssl
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -14,6 +16,11 @@ from pydantic import ValidationError
 from market_ai.data.event_providers import FileEventProvider
 from market_ai.config import Settings
 from market_ai.schemas.llm_context import ExplanationOutput, LLMContextOutput, MarketContextInput, StructuredEvent
+
+try:
+    import certifi
+except Exception:  # pragma: no cover - certifi is declared in requirements.
+    certifi = None
 
 FORBIDDEN_NUMERIC_FORECAST_PATTERNS = (
     re.compile(r"\btarget[_\s-]?price\b", re.IGNORECASE),
@@ -51,6 +58,113 @@ def validate_llm_context_output(output: LLMContextOutput, raw: Any | None = None
         output = output.model_copy(update={"explanation": "Structured context only; numeric forecast text was removed."})
         warnings.append("LLM explanation contained forbidden numeric forecast text and was replaced.")
     return output.model_copy(update={"warnings": warnings})
+
+
+def _default_https_context() -> ssl.SSLContext:
+    if certifi is not None:
+        return ssl.create_default_context(cafile=certifi.where())
+    return ssl.create_default_context()
+
+
+def _read_json_request(request: urllib.request.Request, *, timeout: float) -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=_default_https_context()) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:800]
+        raise RuntimeError(f"HTTP {exc.code}: {body}") from exc
+
+
+def _strip_json_fences(raw: str) -> str:
+    text = raw.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def _extract_json_text(raw: str) -> str:
+    text = _strip_json_fences(raw)
+    if text.startswith("{") or text.startswith("["):
+        return text
+    starts = [idx for idx in [text.find("{"), text.find("[")] if idx >= 0]
+    if not starts:
+        return text
+    start = min(starts)
+    end = max(text.rfind("}"), text.rfind("]"))
+    if end > start:
+        return text[start : end + 1]
+    return text
+
+
+def _normalize_bias(value: Any) -> str:
+    text = str(value or "unknown").strip().lower()
+    if text in {"bull", "bullish", "positive", "up", "upside"}:
+        return "bullish"
+    if text in {"bear", "bearish", "negative", "down", "downside"}:
+        return "bearish"
+    if text in {"neutral", "flat", "none"}:
+        return "neutral"
+    if text in {"mixed", "two-sided", "two_sided"}:
+        return "mixed"
+    return "unknown"
+
+
+def _coerce_score(value: Any, default: float) -> float:
+    if isinstance(value, str):
+        text = value.strip().lower()
+        qualitative = {
+            "very low": 0.1,
+            "low": 0.25,
+            "medium": 0.5,
+            "moderate": 0.5,
+            "high": 0.75,
+            "very high": 0.9,
+            "short-term": 0.8,
+            "short term": 0.8,
+            "medium-term": 0.5,
+            "medium term": 0.5,
+            "long-term": 0.25,
+            "long term": 0.25,
+        }
+        if text in qualitative:
+            return qualitative[text]
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        score = default
+    return min(max(score, 0.0), 1.0)
+
+
+def _sanitize_llm_context_data(data: Any) -> Any:
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        data = data[0]
+    if not isinstance(data, dict):
+        return data
+    cleaned = dict(data)
+    cleaned["overall_bias"] = _normalize_bias(cleaned.get("overall_bias"))
+    cleaned["impact_score"] = _coerce_score(cleaned.get("impact_score"), 0.0)
+    cleaned["uncertainty"] = _coerce_score(cleaned.get("uncertainty"), 1.0)
+    events = []
+    for event in cleaned.get("events") or []:
+        if not isinstance(event, dict):
+            continue
+        item = dict(event)
+        item["directional_bias"] = _normalize_bias(item.get("directional_bias"))
+        item["impact_strength"] = _coerce_score(item.get("impact_strength"), 0.0)
+        item["uncertainty"] = _coerce_score(item.get("uncertainty"), 1.0)
+        item["time_decay"] = _coerce_score(item.get("time_decay"), 1.0)
+        item.setdefault("affected_assets", [])
+        item.setdefault("risk_factors", [])
+        item.setdefault("summary", "")
+        item.setdefault("event_type", "market_event")
+        events.append(item)
+    cleaned["events"] = events
+    if not isinstance(cleaned.get("event_embedding"), list):
+        cleaned["event_embedding"] = []
+    if not isinstance(cleaned.get("warnings"), list):
+        cleaned["warnings"] = [str(cleaned["warnings"])] if cleaned.get("warnings") else []
+    return cleaned
 
 
 class BaseLLMEventEncoder(ABC):
@@ -144,7 +258,7 @@ class OpenAICompatibleLLMEventEncoder(BaseLLMEventEncoder):
         *,
         enabled: bool = False,
         api_base: str | None = None,
-        timeout: float = 8.0,
+        timeout: float = 20.0,
         fallback_provider: FileEventProvider | None = None,
     ):
         self.api_key = api_key
@@ -156,7 +270,22 @@ class OpenAICompatibleLLMEventEncoder(BaseLLMEventEncoder):
 
     def encode_events(self, context: MarketContextInput) -> LLMContextOutput:
         if not self.enabled or not self.api_key:
-            return LocalEventContextEncoder(self.fallback_provider).encode_events(context)
+            fallback = LocalEventContextEncoder(self.fallback_provider).encode_events(context)
+            reason = (
+                "External LLM API key missing; local_rules fallback used."
+                if self.enabled
+                else "External LLM disabled; local_rules fallback used."
+            )
+            return fallback.model_copy(update={"warnings": [*fallback.warnings, reason]})
+        if self.model.lower().startswith("gemma-") and "generativelanguage.googleapis.com" in self.api_base:
+            return GoogleGenerativeLLMEventEncoder(
+                api_key=self.api_key,
+                model=self.model,
+                enabled=self.enabled,
+                api_base="https://generativelanguage.googleapis.com/v1beta",
+                timeout=self.timeout,
+                fallback_provider=self.fallback_provider,
+            ).encode_events(context)
         payload = {
             "model": self.model,
             "messages": [
@@ -165,7 +294,12 @@ class OpenAICompatibleLLMEventEncoder(BaseLLMEventEncoder):
                     "content": (
                         "You are a market context/event encoder. Do not output price targets. "
                         "Do not output p50/p90 price. Do not output direct future return path. "
-                        "Only produce structured context and explanation."
+                        "Only produce structured context and explanation. "
+                        "Return valid JSON with keys: events, overall_bias, impact_score, uncertainty, "
+                        "event_embedding, explanation, warnings. Each event must include event_type, "
+                        "affected_assets, directional_bias, impact_strength, uncertainty, time_decay, "
+                        "summary, risk_factors. Use lowercase directional_bias values and numeric "
+                        "0.0-1.0 floats for impact_strength, uncertainty, time_decay, and impact_score."
                     ),
                 },
                 {"role": "user", "content": context.model_dump_json()},
@@ -183,13 +317,96 @@ class OpenAICompatibleLLMEventEncoder(BaseLLMEventEncoder):
                     headers=headers,
                     method="POST",
                 )
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                    body = json.loads(response.read().decode("utf-8"))
+                body = _read_json_request(request, timeout=self.timeout)
                 content = body["choices"][0]["message"]["content"]
                 return parse_llm_context_json(content)
-            except (KeyError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
+            except (KeyError, RuntimeError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_error = exc
                 time.sleep(0.15 * (attempt + 1))
+        fallback = LocalEventContextEncoder(self.fallback_provider).encode_events(context)
+        return fallback.model_copy(update={"warnings": [*fallback.warnings, f"External LLM fallback: {last_error}"]})
+
+
+class GoogleGenerativeLLMEventEncoder(BaseLLMEventEncoder):
+    def __init__(
+        self,
+        api_key: str | None,
+        model: str,
+        *,
+        enabled: bool = False,
+        api_base: str | None = None,
+        timeout: float = 60.0,
+        fallback_provider: FileEventProvider | None = None,
+    ):
+        self.api_key = api_key
+        self.model = model
+        self.enabled = enabled
+        self.api_base = api_base or "https://generativelanguage.googleapis.com/v1beta"
+        self.timeout = timeout
+        self.fallback_provider = fallback_provider
+
+    def _url(self) -> str:
+        base = self.api_base.strip().rstrip("/")
+        if "openai" in base or "chat/completions" in base:
+            base = "https://generativelanguage.googleapis.com/v1beta"
+        if ":generateContent" in base:
+            url = base
+        else:
+            encoded_model = urllib.parse.quote(self.model, safe="-_.~/")
+            url = f"{base}/models/{encoded_model}:generateContent"
+        separator = "&" if "?" in url else "?"
+        return f"{url}{separator}key={urllib.parse.quote(self.api_key or '')}"
+
+    def _prompt(self, context: MarketContextInput) -> str:
+        return (
+            "You are a market context/event encoder. Do not output price targets, p50/p90 prices, "
+            "or future return paths. Return only valid JSON with keys: events, overall_bias, "
+            "impact_score, uncertainty, event_embedding, explanation, warnings. Each event must "
+            "include event_type, affected_assets, directional_bias, impact_strength, uncertainty, "
+            "time_decay, summary, risk_factors. Use lowercase directional_bias values and numeric "
+            "0.0-1.0 floats for impact_strength, uncertainty, time_decay, and impact_score.\n\n"
+            f"MarketContextInput JSON:\n{context.model_dump_json()}"
+        )
+
+    def encode_events(self, context: MarketContextInput) -> LLMContextOutput:
+        if not self.enabled or not self.api_key:
+            fallback = LocalEventContextEncoder(self.fallback_provider).encode_events(context)
+            reason = (
+                "External LLM API key missing; local_rules fallback used."
+                if self.enabled
+                else "External LLM disabled; local_rules fallback used."
+            )
+            return fallback.model_copy(update={"warnings": [*fallback.warnings, reason]})
+
+        base_payload = {
+            "contents": [{"role": "user", "parts": [{"text": self._prompt(context)}]}],
+        }
+        payloads = [
+            {
+                **base_payload,
+                "generationConfig": {
+                    "temperature": 0.0,
+                    "responseMimeType": "application/json",
+                },
+            },
+            {**base_payload, "generationConfig": {"temperature": 0.0}},
+        ]
+        last_error: Exception | None = None
+        for payload in payloads:
+            try:
+                request = urllib.request.Request(
+                    self._url(),
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                body = _read_json_request(request, timeout=self.timeout)
+                parts = body["candidates"][0]["content"]["parts"]
+                content = "".join(str(part.get("text", "")) for part in parts if not part.get("thought"))
+                return parse_llm_context_json(content)
+            except (KeyError, RuntimeError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = exc
+                time.sleep(0.15)
         fallback = LocalEventContextEncoder(self.fallback_provider).encode_events(context)
         return fallback.model_copy(update={"warnings": [*fallback.warnings, f"External LLM fallback: {last_error}"]})
 
@@ -236,8 +453,7 @@ class LocalHTTPLLMEventEncoder(BaseLLMEventEncoder):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = json.loads(response.read().decode("utf-8"))
+            body = _read_json_request(request, timeout=self.timeout)
             content = (
                 body.get("choices", [{}])[0].get("message", {}).get("content")
                 or body.get("message", {}).get("content")
@@ -290,7 +506,7 @@ class OfflineFileLLMEventEncoder(BaseLLMEventEncoder):
 
 def parse_llm_context_json(raw: str) -> LLMContextOutput:
     try:
-        data: Any = json.loads(raw)
+        data: Any = _sanitize_llm_context_data(json.loads(_extract_json_text(raw)))
         return validate_llm_context_output(LLMContextOutput.model_validate(data), raw=data)
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
         return LLMContextOutput(
@@ -313,6 +529,13 @@ def encoder_from_settings(settings: Settings) -> BaseLLMEventEncoder:
         )
     if mode == "local_rules":
         return LocalEventContextEncoder()
+    if mode == "google_generative":
+        return GoogleGenerativeLLMEventEncoder(
+            api_key=settings.llm_api_key,
+            model=settings.llm_model,
+            enabled=settings.enable_external_llm_calls,
+            api_base=settings.llm_api_base,
+        )
     if settings.is_development and not settings.llm_api_key:
         return LocalEventContextEncoder()
     return OpenAICompatibleLLMEventEncoder(

@@ -211,11 +211,16 @@ def _merge_cross_asset_matrices(aux: np.ndarray, market: np.ndarray | None) -> n
     return out
 
 
-def _event_context_frame_vector(event_context_frame: pd.DataFrame | None, *, symbol: str, as_of_time: datetime) -> list[float] | None:
-    normalized = _normalize_feature_time_frame(event_context_frame)
-    if normalized is None or normalized.empty:
+def _event_context_frame_vector(
+    event_context_frame: pd.DataFrame | None,
+    *,
+    symbol: str,
+    as_of_time: datetime,
+    normalized: bool = False,
+) -> list[float] | None:
+    frame = event_context_frame if normalized else _normalize_feature_time_frame(event_context_frame)
+    if frame is None or frame.empty:
         return None
-    frame = normalized
     if "symbol" in frame.columns:
         symbol_upper = symbol.upper()
         frame = frame[frame["symbol"].astype(str).str.upper().isin([symbol_upper, "ALL", "*"])]
@@ -288,7 +293,11 @@ def build_deep_dataset_from_frame(
     samples: list[DeepLearningSample] = []
 
     last_origin = len(frame) - horizon - 1
-    for origin in range(min_history - 1, last_origin + 1):
+    first_origin = min_history - 1
+    if config.max_samples is not None:
+        first_origin = max(first_origin, last_origin - int(config.max_samples) + 1)
+    normalized_event_context = _normalize_feature_time_frame(event_context_frame)
+    for origin in range(first_origin, last_origin + 1):
         feature_window = features.iloc[origin - lookback + 1 : origin + 1]
         if len(feature_window) != lookback:
             continue
@@ -299,7 +308,12 @@ def build_deep_dataset_from_frame(
         scaled_target = np.clip(future_log_path / recent_vol, -12.0, 12.0).astype(np.float32)
         future_returns = returns_by_bar[origin + 1 : origin + horizon + 1]
         as_of_time = pd.Timestamp(frame.loc[origin, "date"]).to_pydatetime()
-        event_vector = _event_context_frame_vector(event_context_frame, symbol=symbol, as_of_time=as_of_time)
+        event_vector = _event_context_frame_vector(
+            normalized_event_context,
+            symbol=symbol,
+            as_of_time=as_of_time,
+            normalized=True,
+        )
         if event_vector is None:
             event_vector = provider.context_vector(symbol=symbol, as_of_time=as_of_time).as_list()
         samples.append(

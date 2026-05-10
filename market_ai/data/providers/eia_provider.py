@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Any
+import zipfile
 
 import pandas as pd
+import requests
 
 from market_ai.data.storage import read_table
 
@@ -31,6 +32,7 @@ EIA_SERIES = {
 class EIAFetchConfig:
     api_key: str | None = None
     base_url: str = "https://api.eia.gov/v2/seriesid"
+    bulk_url: str = "https://api.eia.gov/bulk/PET.zip"
 
 
 def _weekly_release_time(date_value: Any) -> pd.Timestamp:
@@ -90,15 +92,59 @@ def fetch_eia_series(config: EIAFetchConfig | None = None) -> pd.DataFrame:
         raise RuntimeError("EIA_API_KEY is not set; pass --manual-csv for offline/manual ingest.")
     rows: list[dict[str, Any]] = []
     for metric, series_id in EIA_SERIES.items():
-        query = urllib.parse.urlencode({"api_key": cfg.api_key, "facets[series][]": series_id})
-        url = f"{cfg.base_url}/{series_id}?{query}"
-        with urllib.request.urlopen(url, timeout=20) as response:
-            body = json.loads(response.read().decode("utf-8"))
+        response = requests.get(
+            f"{cfg.base_url}/{series_id}",
+            params={"api_key": cfg.api_key, "facets[series][]": series_id},
+            headers={"User-Agent": "market-ai-data-collector/1.0"},
+            timeout=20,
+            verify=_requests_verify(),
+        )
+        response.raise_for_status()
+        body = response.json()
         data_rows = body.get("response", {}).get("data", [])
         for row in data_rows:
             rows.append({"report_date": row.get("period"), "metric": metric, "value": row.get("value"), "series_id": series_id, "source": "eia_api"})
     if not rows:
         raise RuntimeError("EIA API returned no rows.")
+    return normalize_eia_manual_frame(pd.DataFrame(rows))
+
+
+def fetch_eia_bulk_series(config: EIAFetchConfig | None = None) -> pd.DataFrame:
+    cfg = config or EIAFetchConfig(api_key=os.environ.get("EIA_API_KEY"))
+    response = requests.get(
+        cfg.bulk_url,
+        headers={"User-Agent": "market-ai-data-collector/1.0"},
+        timeout=90,
+        verify=_requests_verify(),
+    )
+    response.raise_for_status()
+    reverse_map = {series_id: metric for metric, series_id in EIA_SERIES.items()}
+    rows: list[dict[str, Any]] = []
+    with zipfile.ZipFile(BytesIO(response.content)) as archive:
+        members = [name for name in archive.namelist() if name.lower().endswith(".txt")]
+        if not members:
+            raise RuntimeError("EIA bulk ZIP did not contain a text payload.")
+        with archive.open(members[0]) as handle:
+            for raw_line in handle:
+                if not raw_line.strip():
+                    continue
+                obj = json.loads(raw_line.decode("utf-8"))
+                series_id = str(obj.get("series_id") or "")
+                metric = reverse_map.get(series_id)
+                if not metric:
+                    continue
+                for period, value in obj.get("data") or []:
+                    rows.append(
+                        {
+                            "report_date": period,
+                            "metric": metric,
+                            "value": value,
+                            "series_id": series_id,
+                            "source": "eia_bulk",
+                        }
+                    )
+    if not rows:
+        raise RuntimeError("EIA bulk file did not contain the configured petroleum series.")
     return normalize_eia_manual_frame(pd.DataFrame(rows))
 
 
@@ -119,3 +165,12 @@ def weekly_to_daily_point_in_time(frame: pd.DataFrame, *, end: str | None = None
     )
     merged["feature_available_at"] = merged["as_of_time"]
     return merged.reset_index(drop=True)
+
+
+def _requests_verify() -> str | bool:
+    try:
+        import certifi
+
+        return certifi.where()
+    except Exception:
+        return True

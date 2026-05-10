@@ -45,6 +45,61 @@ def test_invalid_json_falls_back_safely():
     assert parsed.warnings
 
 
+def test_json_fence_is_parsed_safely():
+    parsed = parse_llm_context_json(
+        """```json
+        {"events": [], "overall_bias": "neutral", "impact_score": 0, "uncertainty": 1, "event_embedding": [], "explanation": "ok", "warnings": []}
+        ```"""
+    )
+    assert parsed.overall_bias == "neutral"
+
+
+def test_json_can_be_extracted_from_model_preface():
+    parsed = parse_llm_context_json(
+        'Here is the JSON: {"events": [], "overall_bias": "mixed", "impact_score": 0, "uncertainty": 1, "event_embedding": [], "explanation": "ok", "warnings": []}'
+    )
+    assert parsed.overall_bias == "mixed"
+
+
+def test_llm_qualitative_scores_are_sanitized():
+    parsed = parse_llm_context_json(
+        """
+        {
+          "events": [
+            {
+              "event_type": "energy_news",
+              "affected_assets": ["CL=F"],
+              "directional_bias": "Bullish",
+              "impact_strength": "Medium",
+              "uncertainty": "Low",
+              "time_decay": "Short-term",
+              "summary": "Inventory draw",
+              "risk_factors": []
+            }
+          ],
+          "overall_bias": "Bullish",
+          "impact_score": "High",
+          "uncertainty": "Low",
+          "event_embedding": [],
+          "explanation": "ok",
+          "warnings": []
+        }
+        """
+    )
+
+    assert parsed.overall_bias == "bullish"
+    assert parsed.events[0].directional_bias == "bullish"
+    assert parsed.events[0].impact_strength == 0.5
+    assert parsed.uncertainty == 0.25
+
+
+def test_single_item_json_array_is_accepted():
+    parsed = parse_llm_context_json(
+        '[{"events": [], "overall_bias": "neutral", "impact_score": 0, "uncertainty": 1, "event_embedding": [], "explanation": "ok", "warnings": []}]'
+    )
+    assert parsed.overall_bias == "neutral"
+
+
 def test_mock_encoder_does_not_emit_numeric_price_forecast():
     context = MarketContextInput(
         symbol="CL=F",

@@ -18,6 +18,7 @@ let predictedByTime = new Map();
 let forecastByTime = new Map();
 let requestVersion = 0;
 let modelCatalog = new Map();
+let latestContextPayload = null;
 
 const MODEL_LABELS = {
   motif: "Motif",
@@ -229,6 +230,102 @@ async function loadExplanation(symbol, interval) {
     panel.querySelector("#explanation-drivers").replaceChildren();
     panel.querySelector("#explanation-warning").textContent = "";
   }
+}
+
+function markerForContextPoint(point) {
+  const bias = String(point.overall_bias || "neutral").toLowerCase();
+  const impact = Number(point.impact_score || 0);
+  const eventCount = Number(point.event_count || 0);
+  const color =
+    bias === "bullish"
+      ? "#7ee787"
+      : bias === "bearish"
+        ? "#ff7b72"
+        : bias === "mixed"
+          ? "#f2cc60"
+          : "#79c0ff";
+  return {
+    time: point.time,
+    position: bias === "bearish" ? "aboveBar" : "belowBar",
+    color,
+    shape: bias === "bearish" ? "arrowDown" : bias === "bullish" ? "arrowUp" : "circle",
+    text: `${bias.slice(0, 1).toUpperCase()} ${eventCount || Math.round(impact * 10)}`,
+  };
+}
+
+function renderContextMarkers(contextPayload) {
+  if (!candleSeriesRef || typeof candleSeriesRef.setMarkers !== "function") return;
+  const markers = (contextPayload?.context_points || []).map(markerForContextPoint);
+  candleSeriesRef.setMarkers(markers);
+}
+
+function renderMarketContextPanel(contextPayload) {
+  latestContextPayload = contextPayload;
+  const mode = document.getElementById("context-mode");
+  const summary = document.getElementById("scenario-summary");
+  const bull = document.getElementById("scenario-bull");
+  const base = document.getElementById("scenario-base");
+  const bear = document.getElementById("scenario-bear");
+  const eventsRoot = document.getElementById("context-events");
+  if (!eventsRoot) return;
+  const scenario = contextPayload?.scenario_commentary || {};
+  if (mode) {
+    const llmMode = contextPayload?.llm_context_summary?.role || scenario.mode || "context";
+    mode.textContent = llmMode;
+  }
+  if (summary) summary.textContent = scenario.summary || "-";
+  if (bull) bull.textContent = scenario.bull || "-";
+  if (base) base.textContent = scenario.base || "-";
+  if (bear) bear.textContent = scenario.bear || "-";
+
+  const contextPoints = contextPayload?.context_points || [];
+  const newsByDay = new Map();
+  (contextPayload?.news || []).forEach((item) => {
+    const day = new Date(Number(item.time) * 1000).toISOString().slice(0, 10);
+    const rows = newsByDay.get(day) || [];
+    rows.push(item);
+    newsByDay.set(day, rows);
+  });
+  const rows = contextPoints.slice(-12).reverse().map((point) => {
+    const day = new Date(Number(point.time) * 1000).toISOString().slice(0, 10);
+    const item = document.createElement("article");
+    item.className = "context-event";
+    item.dataset.bias = String(point.overall_bias || "neutral").toLowerCase();
+    const matchedNews = (newsByDay.get(day) || []).slice(-2);
+    const headlines = matchedNews.length
+      ? matchedNews
+          .map((news) => {
+            const label = document.createElement("span");
+            label.textContent = news.headline || news.source || "News";
+            return label;
+          })
+      : [document.createTextNode(point.explanation || "No matching headline on this day.")];
+    const head = document.createElement("div");
+    head.className = "context-event-head";
+    const title = document.createElement("strong");
+    title.textContent = `${day} · ${String(point.overall_bias || "neutral").toUpperCase()}`;
+    const score = document.createElement("span");
+    score.textContent = `impact ${Number(point.impact_score || 0).toFixed(2)} · events ${point.event_count || 0}`;
+    head.append(title, score);
+    const body = document.createElement("p");
+    headlines.forEach((node, idx) => {
+      if (idx) body.append(document.createTextNode(" / "));
+      body.append(node);
+    });
+    item.append(head, body);
+    return item;
+  });
+  eventsRoot.replaceChildren(...(rows.length ? rows : [document.createTextNode("No point-in-time news/context records in the visible history.")]));
+}
+
+async function loadMarketContext(symbol, interval, models = "") {
+  const modelQuery = models ? `&models=${encodeURIComponent(models)}` : "";
+  const response = await fetch(
+    `/api/market-context?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}${modelQuery}&_ts=${Date.now()}`,
+    { cache: "no-store" },
+  );
+  if (!response.ok) throw new Error("market context unavailable");
+  return response.json();
 }
 
 async function loadBacktestDiagnostics(symbol, interval) {
@@ -725,6 +822,7 @@ function renderChart(payload, resetView = false) {
   predUpperSeriesRef.setData(upper);
   predLowerSeriesRef.setData(lower);
   renderForecastModelSeries(payload.forecast_models || []);
+  renderContextMarkers(latestContextPayload);
   refreshLegendDefault();
 
   if (resetView) {
@@ -758,6 +856,16 @@ async function initDashboard(symbol, interval) {
     setForecastBadges(payload);
     setForecastNotices(payload);
     loadExplanation(symbol, interval);
+    loadMarketContext(symbol, interval, selectedModels)
+      .then((contextPayload) => {
+        if (reqId !== requestVersion) return;
+        renderMarketContextPanel(contextPayload);
+        renderContextMarkers(contextPayload);
+      })
+      .catch(() => {
+        renderMarketContextPanel(null);
+        renderContextMarkers(null);
+      });
     loadBacktestDiagnostics(symbol, interval);
     try {
       const nextDataKey = `${payload.symbol_input}|${payload.interval_resolved}`;
@@ -851,6 +959,9 @@ function bindControls() {
   });
   intervalInput.addEventListener("change", triggerSearch);
   modelInput?.addEventListener("change", triggerSearch);
+  document.getElementById("scenario-input")?.addEventListener("change", () => {
+    renderMarketContextPanel(latestContextPayload);
+  });
   updateSymbolSuggestionState();
 }
 

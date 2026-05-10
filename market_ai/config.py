@@ -7,6 +7,8 @@ from typing import Mapping
 
 from pydantic import BaseModel, Field, field_validator
 
+from market_ai.env import load_project_env
+
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 
@@ -43,7 +45,7 @@ class Settings(BaseModel):
     llm_api_base: str = Field(default="https://api.openai.com/v1/chat/completions")
     local_llm_api_base: str = Field(default="http://localhost:11434/api/chat")
     local_llm_model: str = Field(default="local-context-encoder")
-    llm_context_mode: str = Field(default="openai_compatible")
+    llm_context_mode: str = Field(default="google_generative")
     enable_external_features: bool = Field(default=False)
     enable_cross_asset_features: bool = Field(default=False)
     app_version: str = Field(default="0.2.0")
@@ -69,6 +71,8 @@ class Settings(BaseModel):
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
+        if env is None:
+            load_project_env()
         source = env if env is not None else os.environ
         data_dir = _path_from_env(source.get("DATA_DIR"), PROJECT_DIR / "data")
         return cls(
@@ -95,7 +99,7 @@ class Settings(BaseModel):
             llm_api_base=source.get("LLM_API_BASE", "https://api.openai.com/v1/chat/completions"),
             local_llm_api_base=source.get("LOCAL_LLM_API_BASE", "http://localhost:11434/api/chat"),
             local_llm_model=source.get("LOCAL_LLM_MODEL", "local-context-encoder"),
-            llm_context_mode=source.get("LLM_CONTEXT_MODE", "openai_compatible"),
+            llm_context_mode=source.get("LLM_CONTEXT_MODE", "google_generative"),
             enable_external_features=_parse_bool(source.get("ENABLE_EXTERNAL_FEATURES"), False),
             enable_cross_asset_features=_parse_bool(source.get("ENABLE_CROSS_ASSET_FEATURES"), False),
             app_version=source.get("APP_VERSION", "0.2.0"),

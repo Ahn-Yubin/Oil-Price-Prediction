@@ -13,6 +13,7 @@ from backend.app.api.routes import data_status as data_status_route
 from backend.app.api.routes import explanation as explanation_route
 from backend.app.api.routes import features as features_route
 from backend.app.api.routes import forecast as forecast_route
+from backend.app.api.routes import market_context as market_context_route
 from market_ai.schemas.market import (
     AssetClass,
     AssetMetadata,
@@ -162,6 +163,23 @@ def test_explanation_endpoint_uses_context_encoder_not_price_forecaster(monkeypa
     assert body["symbol"] == "CL=F"
     assert "main_drivers" in body
     assert "target_price" not in str(body).lower()
+
+
+def test_market_context_endpoint_returns_overlay_payload(monkeypatch):
+    monkeypatch.setattr(market_context_route, "build_forecast", lambda **kwargs: _forecast_bundle())
+    monkeypatch.setattr(market_context_route, "_news_items", lambda **kwargs: [{"time": 1_700_000_000, "headline": "OPEC supply cut", "symbol": "CL=F"}])
+    monkeypatch.setattr(
+        market_context_route,
+        "_context_points",
+        lambda **kwargs: [{"time": 1_700_000_000, "overall_bias": "bullish", "impact_score": 0.5, "event_count": 1}],
+    )
+    client = TestClient(main.app)
+    response = client.get("/api/market-context?symbol=CL=F&interval=1d")
+    body = response.json()
+    assert response.status_code == 200
+    assert body["news"][0]["headline"] == "OPEC supply cut"
+    assert body["context_points"][0]["overall_bias"] == "bullish"
+    assert "scenario_commentary" in body
 
 
 def test_backtests_endpoint_missing_is_graceful(tmp_path, monkeypatch):

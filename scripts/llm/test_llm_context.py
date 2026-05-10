@@ -12,6 +12,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from market_ai.env import load_project_env
+
+load_project_env()
+
 from market_ai.data.event_providers import FileEventProvider
 from market_ai.llm.context_builder import encoder_for_mode
 from market_ai.schemas.llm_context import MarketContextInput, RawNewsItem
@@ -19,7 +23,7 @@ from market_ai.schemas.llm_context import MarketContextInput, RawNewsItem
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate LLM context encoder modes without numeric forecasting.")
-    parser.add_argument("--mode", choices=["none", "local_rules", "openai_compatible", "local_http", "offline_file"], default="local_rules")
+    parser.add_argument("--mode", choices=["none", "local_rules", "openai_compatible", "google_generative", "local_http", "offline_file"], default="local_rules")
     parser.add_argument("--events-path", default=os.environ.get("MARKET_EVENTS_PATH", "data/external/events/sample_market_events.csv"))
     parser.add_argument("--offline-file", default="")
     parser.add_argument("--dry-run", action="store_true")
@@ -31,8 +35,12 @@ def main() -> None:
     args = parse_args()
     live = bool(args.live and not args.dry_run)
     provider = FileEventProvider([args.events_path] if args.events_path else [])
-    api_base = os.environ.get("LLM_API_BASE") if args.mode == "openai_compatible" else os.environ.get("LOCAL_LLM_API_BASE")
-    model = os.environ.get("LLM_MODEL") if args.mode == "openai_compatible" else os.environ.get("LOCAL_LLM_MODEL")
+    if args.mode in {"openai_compatible", "google_generative"}:
+        api_base = os.environ.get("LLM_API_BASE")
+        model = os.environ.get("LLM_MODEL")
+    else:
+        api_base = os.environ.get("LOCAL_LLM_API_BASE")
+        model = os.environ.get("LOCAL_LLM_MODEL")
     encoder = encoder_for_mode(
         args.mode,
         provider=provider,

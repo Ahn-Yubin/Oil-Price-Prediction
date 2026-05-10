@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import urllib.request
+from io import BytesIO
+import zipfile
 from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import requests
 
 from market_ai.data.storage import read_table
 
@@ -64,8 +66,23 @@ def load_cftc_manual_csv(path: str | Path) -> pd.DataFrame:
 def fetch_cftc_csv(url: str) -> pd.DataFrame:
     if not url:
         raise RuntimeError("CFTC URL is required for live download; pass --manual-csv for offline ingest.")
-    with urllib.request.urlopen(url, timeout=30) as response:
-        frame = pd.read_csv(response)
+    response = requests.get(
+        url,
+        headers={"User-Agent": "market-ai-data-collector/1.0"},
+        timeout=60,
+        verify=_requests_verify(),
+    )
+    response.raise_for_status()
+    content_type = response.headers.get("Content-Type", "").lower()
+    if url.lower().endswith(".zip") or "zip" in content_type:
+        with zipfile.ZipFile(BytesIO(response.content)) as archive:
+            members = [name for name in archive.namelist() if name.lower().endswith((".txt", ".csv"))]
+            if not members:
+                raise RuntimeError("CFTC ZIP did not contain a text or CSV payload.")
+            with archive.open(members[0]) as handle:
+                frame = pd.read_csv(handle, low_memory=False)
+    else:
+        frame = pd.read_csv(BytesIO(response.content), low_memory=False)
     return normalize_cftc_cot_frame(frame)
 
 
@@ -85,3 +102,12 @@ def cot_weekly_to_daily_point_in_time(frame: pd.DataFrame, *, end: str | None = 
     )
     merged["feature_available_at"] = merged["as_of_time"]
     return merged.reset_index(drop=True)
+
+
+def _requests_verify() -> str | bool:
+    try:
+        import certifi
+
+        return certifi.where()
+    except Exception:
+        return True

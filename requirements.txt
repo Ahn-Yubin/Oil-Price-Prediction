@@ -7,3 +7,4 @@ torch>=2.11
 matplotlib>=3.10
 pytest>=8.3
 httpx>=0.28
+certifi>=2025.1.31

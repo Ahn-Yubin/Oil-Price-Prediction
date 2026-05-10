@@ -69,7 +69,7 @@ def _event_from_mapping(raw: dict[str, Any]) -> MarketEvent | None:
         impact_strength=_safe_float(raw.get("impact_strength", raw.get("impact")), 0.0),
         uncertainty=_safe_float(raw.get("uncertainty"), 0.5),
         source_quality_score=_safe_float(raw.get("source_quality_score", raw.get("source_quality")), 0.5),
-        summary=str(raw.get("summary") or raw.get("title") or raw.get("text") or ""),
+        summary=str(raw.get("summary") or raw.get("headline") or raw.get("title") or raw.get("body") or raw.get("text") or ""),
         source=str(raw.get("source") or "") or None,
     )
 

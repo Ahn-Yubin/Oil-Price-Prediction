@@ -5,8 +5,10 @@ def test_symbol_universe_config_contains_required_groups():
     universes = load_symbol_universe()
     assert "oil_core" in universes
     assert "default_global" in universes
+    assert "research_core" in universes
     assert "CL=F" in universes["oil_core"]
     assert "SPY" in universes["default_global"]
+    assert "^VIX" in universes["research_core"]
 
 
 def test_resolve_symbol_universe():

@@ -16,6 +16,7 @@ from market_ai.data.manifests import entry_from_file, upsert_inventory_entries
 from market_ai.data.market_panel import build_missing_bars_report, save_market_panel
 from market_ai.data.providers.market_price_provider import (
     CsvMarketPriceProvider,
+    StooqMarketPriceProvider,
     YFinanceMarketPriceProvider,
     combine_market_frames,
     write_market_cache,
@@ -33,7 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--symbols", default="")
     parser.add_argument("--interval", choices=["1d", "1h", "30m", "15m"], default="1d")
     parser.add_argument("--period", default="10y")
-    parser.add_argument("--provider", choices=["yfinance", "csv"], default="yfinance")
+    parser.add_argument("--provider", choices=["yfinance", "stooq", "csv"], default="yfinance")
     parser.add_argument("--csv-cache", default="")
     parser.add_argument("--data-root", default=str(DATA_ROOT))
     return parser.parse_args()
@@ -51,7 +52,12 @@ def main() -> None:
     data_root = Path(args.data_root)
     ensure_data_lake(data_root)
     symbols = resolve_symbols(args)
-    provider = CsvMarketPriceProvider(args.csv_cache) if args.provider == "csv" else YFinanceMarketPriceProvider()
+    if args.provider == "csv":
+        provider = CsvMarketPriceProvider(args.csv_cache)
+    elif args.provider == "stooq":
+        provider = StooqMarketPriceProvider()
+    else:
+        provider = YFinanceMarketPriceProvider()
     frames = []
     failures = []
     raw_paths = []

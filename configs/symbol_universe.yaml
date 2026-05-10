@@ -39,3 +39,23 @@ default_global:
   - QQQ
   - XLE
   - USO
+
+research_core:
+  - CL=F
+  - BZ=F
+  - NG=F
+  - RB=F
+  - HO=F
+  - GC=F
+  - SI=F
+  - HG=F
+  - DX-Y.NYB
+  - EURUSD=X
+  - USDKRW=X
+  - JPY=X
+  - SPY
+  - QQQ
+  - ^GSPC
+  - ^VIX
+  - XLE
+  - USO

@@ -1,20 +1,72 @@
 # 아키텍처
 
-이 프로젝트는 `backend`, `market_ai`, `frontend`, `scripts`를 명확히 분리합니다. 목표는 oil dashboard가 아니라 여러 시장 자산에 확장 가능한 Universal Market Forecasting Dashboard입니다.
+이 프로젝트는 `backend`, `market_ai`, `frontend`, `scripts`를 분리해 oil-first forecasting dashboard를 범용 시장 예측 플랫폼으로 확장합니다.
 
 ## 책임 분리
 
-- `backend/`: FastAPI route, HTTP error 처리, static frontend serving, service adapter만 둡니다.
-- `market_ai/`: 데이터 수집, feature engineering, forecasting, modeling, calibration, regime, backtesting, LLM context logic을 둡니다.
-- `frontend/`: TradingView overlay UI, control, panel, API client를 둡니다.
-- `scripts/`: 사람이 직접 실행하는 CLI entrypoint만 둡니다.
-- `artifacts/`: `.npz` model artifact와 metadata JSON을 source code와 분리합니다.
-- `outputs/`: forecast, backtest, plot, report 같은 생성 산출물을 둡니다.
+| 영역 | 책임 |
+| --- | --- |
+| `backend/` | FastAPI route, HTTP error 처리, static frontend serving, service adapter |
+| `market_ai/` | 데이터 수집/정규화, feature engineering, forecasting, modeling, calibration, regime, backtesting, LLM context |
+| `frontend/` | chart overlay, controls, data quality panel, context marker/news panel |
+| `scripts/` | 사람이 실행하는 CLI entrypoint |
+| `artifacts/` | model artifact와 metadata 저장 |
+| `data/` | raw/interim/processed/external/features/manifests |
+| `outputs/` | backtest, plot, generated output. 오래된 Markdown report는 canonical docs로 합치고 삭제 |
+| `docs/ko`, `docs/en` | 한국어 원본과 영어 mirror |
 
 ## 의존성 방향
 
-`backend`는 `market_ai`를 호출할 수 있습니다. `market_ai`는 `backend`를 import하면 안 됩니다. 이렇게 해야 API server 없이도 모델, backtest, data pipeline을 독립적으로 테스트할 수 있습니다.
+`backend`는 `market_ai`를 호출할 수 있습니다. `market_ai`는 `backend`를 import하면 안 됩니다. 이렇게 해야 API server 없이도 data pipeline, model, backtest를 독립적으로 테스트할 수 있습니다.
+
+```text
+frontend -> backend API -> market_ai
+scripts ---------------> market_ai
+tests -----------------> backend / market_ai
+```
+
+## Runtime 흐름
+
+```text
+provider raw data
+-> data/raw, data/interim
+-> data/processed market/fundamental/event context
+-> training scripts
+-> artifacts/models + artifacts/metadata
+-> backend forecast/context APIs
+-> frontend chart overlay
+```
+
+## LLM 흐름
+
+LLM은 `market_ai.llm` 내부에서 context encoder로만 쓰입니다.
+
+```text
+news/events
+-> LocalEventContextEncoder 또는 OpenAICompatibleLLMEventEncoder
+-> event_context_daily.csv
+-> llm_context_seq_moe x_event_context
+```
+
+LLM은 numeric forecast path를 생성하지 않습니다.
+
+## API 계층
+
+- `/api/forecast`: 신규 typed forecast contract
+- `/api/chart`: 기존 chart compatibility contract
+- `/api/market-context`: 뉴스/context marker와 scenario commentary
+- `/api/explanation`: forecast explanation
+- `/api/models`, `/api/data-status`, `/api/backtests`: 운영/진단 endpoint
+
+`/api/chart` compatibility는 명시적으로 제거하기 전까지 유지합니다.
 
 ## 호환성 계층
 
 신규 uvicorn entrypoint는 `backend.app.main:app`입니다. 기존 `app.main:app`는 구형 실행 명령을 위한 얇은 wrapper로만 유지합니다.
+
+## 운영 경계
+
+- Production에서 mock/synthetic fallback을 조용히 쓰지 않습니다.
+- API key는 환경변수 또는 `.env`로만 주입하고 커밋하지 않습니다.
+- `.pt`/`.npz` artifact는 source code와 분리합니다.
+- Documentation은 한국어/영어 mirror를 같이 갱신합니다.

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -9,8 +11,28 @@ from market_ai.data.manifests import entry_from_file, manifest_schema
 from market_ai.data.providers.cftc_provider import cot_weekly_to_daily_point_in_time, normalize_cftc_cot_frame
 from market_ai.data.providers.cme_provider import normalize_cme_settlements_frame
 from market_ai.data.providers.eia_provider import normalize_eia_manual_frame, weekly_to_daily_point_in_time
-from market_ai.data.providers.market_price_provider import missing_bars_report, normalize_market_price_frame
+from market_ai.data.providers.fred_provider import build_fred_wide_panel, normalize_fred_frame
+from market_ai.data.providers.market_price_provider import _stooq_daily_url, missing_bars_report, normalize_market_price_frame
+from market_ai.data.providers.public_news_provider import normalize_public_news
 from market_ai.schemas.deep_learning import DeepDatasetConfig
+
+
+def test_manual_csv_ingest_scripts_fail_fast_on_placeholder_paths():
+    commands = [
+        ["scripts/data/fetch_eia_petroleum.py", "--manual-csv", "path/to/eia.csv", "EIA manual CSV not found"],
+        ["scripts/data/fetch_cftc_cot.py", "--manual-csv", "path/to/cftc.csv", "CFTC COT manual CSV not found"],
+        ["scripts/data/fetch_cme_settlements.py", "--manual-csv", "path/to/cme.csv", "CME settlements manual CSV not found"],
+    ]
+    for script, flag, csv_path, expected in commands:
+        result = subprocess.run(
+            [sys.executable, script, flag, csv_path],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode != 0
+        assert expected in result.stderr
+        assert "Traceback" not in result.stderr
 
 
 def test_manifest_schema_and_inventory_entry(tmp_path):
@@ -38,6 +60,45 @@ def test_market_price_normalization_removes_duplicates_and_reports_missing():
     assert len(normalized) == 2
     report = missing_bars_report(normalized, interval="1d", symbol="CL=F")
     assert report["missing_timestamp"].str.contains("2025-01-02").any()
+
+
+def test_stooq_url_uses_daily_csv_params():
+    url = _stooq_daily_url("spy.us", period="1y")
+    assert "stooq.com/q/d/l/" in url
+    assert "s=spy.us" in url
+    assert "i=d" in url
+    assert "d1=" in url
+
+
+def test_fred_macro_normalization_and_wide_panel():
+    raw = pd.DataFrame(
+        {
+            "observation_date": ["2025-01-01", "2025-01-02", "2025-01-03"],
+            "DGS10": ["4.2", ".", "4.3"],
+        }
+    )
+    normalized = normalize_fred_frame(raw, series_id="DGS10", label="10-year Treasury")
+    assert normalized["series_id"].unique().tolist() == ["DGS10"]
+    assert normalized["value"].isna().sum() == 1
+    wide = build_fred_wide_panel(normalized)
+    assert "DGS10" in wide.columns
+
+
+def test_public_news_normalization_deduplicates_rows():
+    frame = pd.DataFrame(
+        {
+            "published_at": ["2025-01-01T00:00:00Z", "2025-01-01T00:00:00Z"],
+            "symbol": ["CL=F", "CL=F"],
+            "headline": ["OPEC supply cut lifts crude", "OPEC supply cut lifts crude"],
+            "body": ["", ""],
+            "source": ["unit", "unit"],
+            "url": ["https://example.com/a", "https://example.com/a"],
+            "retrieved_at": ["2025-01-01T00:05:00Z", "2025-01-01T00:05:00Z"],
+        }
+    )
+    normalized = normalize_public_news([frame])
+    assert len(normalized) == 1
+    assert normalized.iloc[0]["symbol"] == "CL=F"
 
 
 def test_fundamental_parsers_and_point_in_time_fill():

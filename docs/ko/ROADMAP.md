@@ -1,17 +1,40 @@
 # 로드맵
 
-이 프로젝트는 유가 예측 use case에서 시작해 범용 시장 AI 플랫폼으로 확장합니다.
+이 프로젝트는 유가 예측 use case에서 시작해 범용 시장 AI 플랫폼으로 확장합니다. 현재 우선순위는 “데이터 신뢰도 -> LLM context 안정화 -> 재학습 -> backtest/calibration -> frontend 운영성” 순서입니다.
 
-## 다음 단계
+## 즉시 우선순위
 
-- 유가 선물에서 주식, ETF, FX, crypto, rates, index, commodity로 확장합니다.
-- Provider abstraction을 강화하고 data quality report를 정례화합니다.
-- Calibration, conformal interval, quantile coverage 평가를 확장합니다.
-- LLM event ingestion을 production-grade로 만들되 숫자 forecast는 시계열 모델에만 맡깁니다.
-- Frontend가 커지면 Vite component 구조로 점진적으로 분리합니다.
+1. Google Gemma/Gemini LLM 연결을 live로 검증합니다.
+2. `data/raw/news/public_market_news.csv`를 기반으로 live LLM event context를 재생성합니다.
+3. `llm_context_seq_moe`와 `deep_lstm_tcn_fusion`을 h8/h45로 재학습합니다.
+4. CME settlement/curve CSV를 확보해 `cme_curve_daily.csv`를 생성합니다.
+5. Rolling backtest와 quantile calibration을 실행합니다.
+6. `/api/market-context`와 frontend marker/panel을 실제 차트에서 검증합니다.
+
+## 데이터 확장
+
+- yfinance 외 보조 가격 source를 추가합니다.
+- CME futures curve, settlement, volume, open interest를 장기 feature로 넣습니다.
+- 뉴스 history를 최소 수년 단위로 늘립니다.
+- EIA/CFTC/FRED release timestamp를 더 정밀하게 관리합니다.
+- 데이터 inventory와 latest snapshot을 정례적으로 갱신합니다.
+
+## 모델 확장
+
+- `research_core`에서 원유/에너지 중심 모델을 안정화합니다.
+- 이후 ETF, FX, metals, indices, rates, crypto로 universe를 확장합니다.
+- LLM은 context encoder로만 유지하고, 숫자 예측은 time-series model이 담당합니다.
+- Coverage가 측정된 뒤에만 calibrated interval 표현을 사용합니다.
+
+## Frontend 확장
+
+- Context marker와 뉴스 card를 모델 진단용 UI로 정리합니다.
+- Forecast scenario 설명을 data quality와 함께 표시합니다.
+- UI 규모가 커지면 chart, controls, panels, api, state 모듈로 분리합니다.
 
 ## 유지해야 할 원칙
 
 - `/api/chart` compatibility를 명시적 제거 전까지 유지합니다.
 - Artifact와 metadata는 source code와 분리합니다.
+- Production에서 mock/synthetic fallback을 조용히 사용하지 않습니다.
 - 한국어 원본과 영어 mirror 문서를 항상 함께 갱신합니다.

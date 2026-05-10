@@ -1,17 +1,41 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from io import StringIO
+import os
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urlencode
 
 import pandas as pd
+import requests
 
 from market_ai.data.storage import read_table, safe_symbol, write_table
 
 
 SUPPORTED_INTERVALS = {"1d", "1h", "30m", "15m"}
 INTERVAL_FREQ = {"1d": "D", "1h": "h", "30m": "30min", "15m": "15min"}
+STOOQ_DAILY_SYMBOLS = {
+    "CL=F": "cl.f",
+    "BZ=F": "brn.f",
+    "NG=F": "ng.f",
+    "RB=F": "rb.f",
+    "HO=F": "ho.f",
+    "GC=F": "gc.f",
+    "SI=F": "si.f",
+    "HG=F": "hg.f",
+    "DX-Y.NYB": "dx.f",
+    "EURUSD=X": "eurusd",
+    "USDKRW=X": "usdkrw",
+    "JPY=X": "usdjpy",
+    "SPY": "spy.us",
+    "QQQ": "qqq.us",
+    "^GSPC": "^spx",
+    "^VIX": "^vix",
+    "XLE": "xle.us",
+    "USO": "uso.us",
+}
 
 
 @dataclass(frozen=True)
@@ -80,6 +104,33 @@ class CsvMarketPriceProvider(MarketPriceProvider):
         return normalize_market_price_frame(frame, symbol=symbol, provider=self.provider_name)
 
 
+class StooqMarketPriceProvider(MarketPriceProvider):
+    provider_name = "stooq"
+
+    def fetch(self, symbol: str, *, interval: str, period: str) -> pd.DataFrame:
+        if interval != "1d":
+            raise ValueError("Stooq public CSV fetch currently supports daily bars only.")
+        provider_symbol = STOOQ_DAILY_SYMBOLS.get(symbol, symbol.lower())
+        api_key = os.environ.get("STOOQ_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("Stooq CSV download requires STOOQ_API_KEY in this environment.")
+        url = _stooq_daily_url(provider_symbol, period=period, api_key=api_key)
+        response = requests.get(
+            url,
+            headers={"User-Agent": "market-ai-data-collector/1.0"},
+            timeout=15,
+            verify=_requests_verify(),
+        )
+        response.raise_for_status()
+        payload = response.text
+        if payload.lstrip().startswith("Get your apikey"):
+            raise RuntimeError("Stooq rejected CSV download; STOOQ_API_KEY is missing or invalid.")
+        frame = pd.read_csv(StringIO(payload))
+        if frame.empty or "Close" not in frame.columns:
+            raise RuntimeError(f"Stooq returned no daily rows for {symbol} ({provider_symbol})")
+        return normalize_market_price_frame(frame, symbol=symbol, provider=self.provider_name)
+
+
 def normalize_market_price_frame(frame: pd.DataFrame, *, symbol: str, provider: str) -> pd.DataFrame:
     out = frame.copy()
     rename_map = {
@@ -112,6 +163,50 @@ def normalize_market_price_frame(frame: pd.DataFrame, *, symbol: str, provider: 
     out = out[out["close"] > 0.0]
     out = out.drop_duplicates(subset=["timestamp", "symbol"], keep="last")
     return out[["timestamp", "symbol", "open", "high", "low", "close", "volume", "provider", "fetched_at"]].reset_index(drop=True)
+
+
+def _period_start(period: str, *, now: datetime | None = None) -> datetime | None:
+    value = period.strip().lower()
+    if value in {"", "max"}:
+        return None
+    now = now or datetime.now(timezone.utc)
+    if value == "ytd":
+        return datetime(now.year, 1, 1, tzinfo=timezone.utc)
+    if value.endswith("mo"):
+        try:
+            return now - timedelta(days=31 * int(value[:-2]))
+        except ValueError:
+            return None
+    unit = value[-1]
+    try:
+        count = int(value[:-1])
+    except ValueError:
+        return None
+    if unit == "y":
+        return now - timedelta(days=365 * count)
+    if unit == "d":
+        return now - timedelta(days=count)
+    return None
+
+
+def _stooq_daily_url(provider_symbol: str, *, period: str, api_key: str | None = None) -> str:
+    params = {"s": provider_symbol, "i": "d"}
+    start = _period_start(period)
+    if start is not None:
+        params["d1"] = start.strftime("%Y%m%d")
+        params["d2"] = datetime.now(timezone.utc).strftime("%Y%m%d")
+    if api_key:
+        params["apikey"] = api_key
+    return "https://stooq.com/q/d/l/?" + urlencode(params)
+
+
+def _requests_verify() -> str | bool:
+    try:
+        import certifi
+
+        return certifi.where()
+    except Exception:
+        return True
 
 
 def write_market_cache(frame: pd.DataFrame, *, root: Path, provider: str, interval: str, symbol: str) -> Path:

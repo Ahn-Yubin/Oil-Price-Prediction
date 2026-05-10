@@ -5,6 +5,8 @@ import argparse
 from pathlib import Path
 import sys
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -12,6 +14,12 @@ if str(ROOT) not in sys.path:
 from market_ai.data.manifests import entry_from_file, upsert_inventory_entries
 from market_ai.data.providers.cftc_provider import cot_weekly_to_daily_point_in_time, fetch_cftc_csv, load_cftc_manual_csv
 from market_ai.data.storage import DATA_ROOT, ensure_data_lake, write_table
+
+
+CFTC_MANUAL_CSV_HINT = (
+    "report_date/date plus open_interest, managed_money_long, managed_money_short, "
+    "commercial_long, commercial_short; official CFTC column aliases are also accepted"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,16 +31,35 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _require_manual_csv(path: str, *, dataset_name: str, column_hint: str) -> Path:
+    resolved = Path(path).expanduser()
+    if not resolved.exists():
+        raise SystemExit(
+            f"{dataset_name} manual CSV not found: {path}\n"
+            "Replace the documentation placeholder with a real local CSV path. "
+            f"Expected columns: {column_hint}."
+        )
+    if not resolved.is_file():
+        raise SystemExit(f"{dataset_name} manual CSV path is not a file: {path}")
+    return resolved
+
+
+def _split(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def main() -> None:
     args = parse_args()
     data_root = Path(args.data_root)
     ensure_data_lake(data_root)
     if args.manual_csv:
-        weekly = load_cftc_manual_csv(args.manual_csv)
-        raw_path = data_root / "raw" / "cftc" / Path(args.manual_csv).name
+        manual_path = _require_manual_csv(args.manual_csv, dataset_name="CFTC COT", column_hint=CFTC_MANUAL_CSV_HINT)
+        weekly = load_cftc_manual_csv(manual_path)
+        raw_path = data_root / "raw" / "cftc" / manual_path.name
         source = "manual_csv"
     elif args.url:
-        weekly = fetch_cftc_csv(args.url)
+        frames = [fetch_cftc_csv(url) for url in _split(args.url)]
+        weekly = pd.concat(frames, ignore_index=True).sort_values("report_date").drop_duplicates(subset=["report_date"], keep="last")
         raw_path = data_root / "raw" / "cftc" / "cftc_cot_weekly.csv"
         source = args.url
     else:

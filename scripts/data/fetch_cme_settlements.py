@@ -14,6 +14,12 @@ from market_ai.data.providers.cme_provider import fetch_cme_csv, load_cme_manual
 from market_ai.data.storage import DATA_ROOT, ensure_data_lake, write_table
 
 
+CME_MANUAL_CSV_HINT = (
+    "trade_date/date plus settle/settlement; contract/contract_month is recommended "
+    "so the curve can build m1/m2/m3/m6 spreads"
+)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fetch or import licensed/manual CME settlements.")
     parser.add_argument("--manual-csv", default="")
@@ -22,13 +28,27 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _require_manual_csv(path: str, *, dataset_name: str, column_hint: str) -> Path:
+    resolved = Path(path).expanduser()
+    if not resolved.exists():
+        raise SystemExit(
+            f"{dataset_name} manual CSV not found: {path}\n"
+            "Replace the documentation placeholder with a real local CSV path. "
+            f"Expected columns: {column_hint}."
+        )
+    if not resolved.is_file():
+        raise SystemExit(f"{dataset_name} manual CSV path is not a file: {path}")
+    return resolved
+
+
 def main() -> None:
     args = parse_args()
     data_root = Path(args.data_root)
     ensure_data_lake(data_root)
     if args.manual_csv:
-        processed = load_cme_manual_csv(args.manual_csv)
-        raw_path = data_root / "raw" / "cme" / Path(args.manual_csv).name
+        manual_path = _require_manual_csv(args.manual_csv, dataset_name="CME settlements", column_hint=CME_MANUAL_CSV_HINT)
+        processed = load_cme_manual_csv(manual_path)
+        raw_path = data_root / "raw" / "cme" / manual_path.name
         source = "manual_csv"
     elif args.url:
         processed = fetch_cme_csv(args.url)
