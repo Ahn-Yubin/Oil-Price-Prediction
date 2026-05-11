@@ -13,7 +13,7 @@ from market_ai.data.providers.cme_provider import normalize_cme_settlements_fram
 from market_ai.data.providers.eia_provider import normalize_eia_manual_frame, weekly_to_daily_point_in_time
 from market_ai.data.providers.fred_provider import build_fred_wide_panel, normalize_fred_frame
 from market_ai.data.providers.market_price_provider import _stooq_daily_url, missing_bars_report, normalize_market_price_frame
-from market_ai.data.providers.public_news_provider import normalize_public_news
+from market_ai.data.providers.public_news_provider import gdelt_doc_url, google_news_rss_url, normalize_public_news
 from market_ai.schemas.deep_learning import DeepDatasetConfig
 
 
@@ -99,6 +99,52 @@ def test_public_news_normalization_deduplicates_rows():
     normalized = normalize_public_news([frame])
     assert len(normalized) == 1
     assert normalized.iloc[0]["symbol"] == "CL=F"
+
+
+def test_public_news_normalization_accepts_mixed_datetime_formats():
+    first = pd.DataFrame(
+        {
+            "published_at": ["2026-03-13 10:40:36+00:00"],
+            "symbol": ["CL=F"],
+            "headline": ["Yahoo-style timestamp"],
+            "body": [""],
+            "source": ["yahoo_finance_rss"],
+            "url": ["https://example.com/y"],
+            "retrieved_at": ["2026-03-13 10:41:00+00:00"],
+        }
+    )
+    second = pd.DataFrame(
+        {
+            "published_at": ["2026-05-11T05:50:17+00:00"],
+            "symbol": ["CL=F"],
+            "headline": ["RSS ISO timestamp"],
+            "body": [""],
+            "source": ["google_news_rss"],
+            "url": ["https://example.com/g"],
+            "retrieved_at": ["2026-05-11T05:51:00+00:00"],
+        }
+    )
+    normalized = normalize_public_news([first, second])
+    assert len(normalized) == 2
+
+
+def test_gdelt_doc_url_supports_windowed_queries_and_caps_records():
+    url = gdelt_doc_url(
+        '"crude oil"',
+        start_datetime="20260501000000",
+        end_datetime="20260508235959",
+        maxrecords=999,
+    )
+    assert "startdatetime=20260501000000" in url
+    assert "enddatetime=20260508235959" in url
+    assert "timespan=" not in url
+    assert "maxrecords=250" in url
+
+
+def test_google_news_rss_url_uses_public_rss_search_endpoint():
+    url = google_news_rss_url('"crude oil"')
+    assert url.startswith("https://news.google.com/rss/search?")
+    assert "ceid=US%3Aen" in url
 
 
 def test_fundamental_parsers_and_point_in_time_fill():

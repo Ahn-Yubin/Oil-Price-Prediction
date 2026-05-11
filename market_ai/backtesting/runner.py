@@ -51,23 +51,50 @@ def _clean_close(values) -> np.ndarray:
     return arr[np.isfinite(arr) & (arr > 0.0)]
 
 
-def download_close(symbol: str, interval: str, start: str | None = None, end: str | None = None) -> np.ndarray:
+def _normalize_yfinance_frame(data: pd.DataFrame) -> pd.DataFrame:
+    frame = data.reset_index()
+    if isinstance(frame.columns, pd.MultiIndex):
+        frame.columns = [str(col[0]) if isinstance(col, tuple) else str(col) for col in frame.columns]
+    date_col = "Date" if "Date" in frame.columns else "Datetime" if "Datetime" in frame.columns else frame.columns[0]
+    frame = frame.rename(
+        columns={
+            date_col: "date",
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume",
+        }
+    )
+    keep = ["date", "open", "high", "low", "close", "volume"]
+    out = frame[[col for col in keep if col in frame.columns]].copy()
+    if "volume" not in out.columns:
+        out["volume"] = 0.0
+    for col in ["open", "high", "low", "close", "volume"]:
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+    out = out.dropna(subset=["date", "open", "high", "low", "close"]).reset_index(drop=True)
+    return out[out["close"] > 0.0].reset_index(drop=True)
+
+
+def download_candles(symbol: str, interval: str, start: str | None = None, end: str | None = None) -> pd.DataFrame:
     if start or end:
         data = yf.download(symbol, start=start, end=end, interval=interval, auto_adjust=False, progress=False)
         if not data.empty:
-            close = data["Close"].iloc[:, 0] if isinstance(data.columns, pd.MultiIndex) else data["Close"]
-            arr = _clean_close(close)
-            if len(arr) > INTERVAL_TO_HORIZON[interval] + 60:
-                return arr
+            frame = _normalize_yfinance_frame(data)
+            if len(frame) > INTERVAL_TO_HORIZON[interval] + 60:
+                return frame
     for period in BACKTEST_PERIOD_CANDIDATES.get(interval, ["2y"]):
         data = yf.download(symbol, period=period, interval=interval, auto_adjust=False, progress=False)
         if data.empty:
             continue
-        close = data["Close"].iloc[:, 0] if isinstance(data.columns, pd.MultiIndex) else data["Close"]
-        arr = _clean_close(close)
-        if len(arr) > INTERVAL_TO_HORIZON[interval] + 180:
-            return arr
+        frame = _normalize_yfinance_frame(data)
+        if len(frame) > INTERVAL_TO_HORIZON[interval] + 180:
+            return frame
     raise RuntimeError(f"No usable data for {symbol} {interval}")
+
+
+def download_close(symbol: str, interval: str, start: str | None = None, end: str | None = None) -> np.ndarray:
+    return _clean_close(download_candles(symbol, interval, start=start, end=end)["close"])
 
 
 def _returns(close: np.ndarray) -> np.ndarray:
@@ -235,6 +262,9 @@ def forecast_llm_context_seq_moe(close: np.ndarray, interval: str, horizon: int)
     model = forecast_with_deep_model(model_name="llm_context_seq_moe", close=close, interval=interval, horizon=horizon)
     base = float(close[-1])
     return ForecastResult("llm_context_seq_moe", np.log(np.asarray(model["values"], dtype=np.float64) / base))
+
+
+DEEP_MODEL_NAMES = {"deep_lstm_tcn_fusion", "llm_context_seq_moe"}
 
 
 FORECASTERS = {
@@ -454,6 +484,8 @@ def run_rolling_backtest(
     interval: str,
     model_names: list[str],
     *,
+    symbol: str = "UNKNOWN",
+    candles: pd.DataFrame | None = None,
     lookback: int,
     horizon: int,
     step: int,
@@ -486,6 +518,7 @@ def run_rolling_backtest(
     for origin in origins:
         train_start = max(0, origin + 1 - lookback) if rolling else 0
         train_close = close[train_start : origin + 1]
+        train_candles = candles.iloc[train_start : origin + 1].copy() if candles is not None else None
         base = float(close[origin])
         actual = close[origin + 1 : origin + 1 + horizon]
         actual_path = np.log(actual / base)
@@ -494,7 +527,18 @@ def run_rolling_backtest(
         for name in model_names:
             fn = FORECASTERS[name]
             try:
-                pred_path = np.asarray(fn(train_close, interval, horizon).cum_log_path[:horizon], dtype=np.float64)
+                if name in DEEP_MODEL_NAMES:
+                    model = forecast_with_deep_model(
+                        model_name=name,
+                        close=train_close,
+                        interval=interval,
+                        horizon=horizon,
+                        symbol=symbol,
+                        candles=train_candles,
+                    )
+                    pred_path = np.asarray(np.log(np.asarray(model["values"], dtype=np.float64) / base)[:horizon], dtype=np.float64)
+                else:
+                    pred_path = np.asarray(fn(train_close, interval, horizon).cum_log_path[:horizon], dtype=np.float64)
             except Exception as exc:
                 summary_rows.append({"model": name, "origin": origin, "regime": regime, "error": str(exc)})
                 continue
@@ -740,7 +784,8 @@ def main() -> None:
     }
 
     for interval in intervals:
-        close = download_close(args.symbol, interval, start=args.start or None, end=args.end or None)
+        candles = download_candles(args.symbol, interval, start=args.start or None, end=args.end or None)
+        close = _clean_close(candles["close"])
         horizon = args.horizon or INTERVAL_TO_HORIZON[interval]
         horizon = max(1, min(horizon, INTERVAL_TO_HORIZON[interval]))
         lookback = args.lookback or {"1d": 260, "1h": 420, "30m": 420, "15m": 560}.get(interval, 420)
@@ -751,6 +796,8 @@ def main() -> None:
             close,
             interval,
             model_names,
+            symbol=args.symbol,
+            candles=candles,
             lookback=lookback,
             horizon=horizon,
             step=step,

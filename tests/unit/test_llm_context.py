@@ -91,6 +91,38 @@ def test_llm_qualitative_scores_are_sanitized():
     assert parsed.events[0].directional_bias == "bullish"
     assert parsed.events[0].impact_strength == 0.5
     assert parsed.uncertainty == 0.25
+    assert len(parsed.event_embedding) == 13
+    assert parsed.event_embedding[0] > 0.0
+
+
+def test_missing_llm_embedding_is_derived_from_structured_events():
+    parsed = parse_llm_context_json(
+        """
+        {
+          "events": [
+            {
+              "event_type": "energy_supply",
+              "affected_assets": ["CL=F"],
+              "directional_bias": "bearish",
+              "impact_strength": 0.7,
+              "uncertainty": 0.3,
+              "time_decay": 0.8,
+              "summary": "Production increase",
+              "risk_factors": []
+            }
+          ],
+          "overall_bias": "bearish",
+          "impact_score": 0.7,
+          "uncertainty": 0.3,
+          "explanation": "ok",
+          "warnings": []
+        }
+        """
+    )
+
+    assert len(parsed.event_embedding) == 13
+    assert parsed.event_embedding[0] < 0.0
+    assert parsed.event_embedding[10] > 0.0
 
 
 def test_single_item_json_array_is_accepted():

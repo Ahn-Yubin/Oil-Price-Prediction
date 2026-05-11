@@ -22,6 +22,9 @@ def predict_deep_quantiles(
     interval: str,
     horizon: int,
     event_provider: FileEventProvider | None = None,
+    event_context_frame: pd.DataFrame | None = None,
+    auxiliary_frame: pd.DataFrame | None = None,
+    market_panel: pd.DataFrame | None = None,
     device: str = "cpu",
 ) -> dict[str, Any]:
     model, metadata = load_deep_artifact(artifact_path, map_location=device)
@@ -32,7 +35,7 @@ def predict_deep_quantiles(
         horizon=horizon,
         min_history=lookback,
         max_samples=1,
-        event_context_enabled=event_provider is not None,
+        event_context_enabled=event_provider is not None or event_context_frame is not None,
         validation_ratio=0.0,
         test_ratio=0.0,
     )
@@ -42,6 +45,9 @@ def predict_deep_quantiles(
         candles=candles,
         config=config,
         event_provider=event_provider or NullEventProvider(),
+        auxiliary_frame=auxiliary_frame,
+        market_panel=market_panel,
+        event_context_frame=event_context_frame,
     )
     if not dataset.samples:
         raise RuntimeError("Not enough candles for deep model inference")

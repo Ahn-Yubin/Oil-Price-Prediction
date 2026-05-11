@@ -31,6 +31,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--offline-file", default="")
     parser.add_argument("--data-root", default=str(DATA_ROOT))
     parser.add_argument("--progress-every", type=int, default=25, help="Print progress every N completed rows. LLM calls always print start/done.")
+    parser.add_argument("--no-resume-cache", action="store_true", help="Ignore existing llm_context_cache.jsonl rows.")
+    parser.add_argument("--news-limit-per-context", type=int, default=5, help="Maximum recent news items passed into one symbol/date context.")
+    parser.add_argument("--llm-batch-size", type=int, default=1, help="Number of symbol/date contexts to encode in one external LLM request.")
+    parser.add_argument("--llm-min-interval-seconds", type=float, default=0.0, help="Minimum seconds between external LLM requests for RPM limits.")
     return parser.parse_args()
 
 
@@ -58,9 +62,20 @@ def _progress_logger(every: int):
         symbol = str(event.get("symbol", ""))
         timestamp = str(event.get("timestamp", ""))[:10]
         elapsed = _elapsed(event.get("elapsed_seconds", 0))
-        if phase == "llm_start":
+        if phase == "llm_batch_start":
+            request_done = int(event.get("completed_llm_requests", 0))
+            batch_contexts = int(event.get("batch_contexts", 0))
             print(
-                f"[event-context] LLM start llm={llm_done + 1}/{llm_total} "
+                f"[event-context] LLM batch start request={request_done + 1} "
+                f"ctx={llm_done}/{llm_total} rows={done}/{total} batch={batch_contexts} "
+                f"symbol={symbol} date={timestamp} news={news_count} elapsed={elapsed}",
+                flush=True,
+            )
+            return
+        if phase == "llm_start":
+            request_done = int(event.get("completed_llm_requests", 0))
+            print(
+                f"[event-context] LLM start request={request_done + 1} ctx={llm_done + 1}/{llm_total} "
                 f"rows={done}/{total} symbol={symbol} date={timestamp} news={news_count} elapsed={elapsed}",
                 flush=True,
             )
@@ -73,10 +88,10 @@ def _progress_logger(every: int):
             return
         percent = done / total * 100
         event_count = int(event.get("event_count", 0))
-        status = "fallback" if "External LLM fallback" in warnings else "ok"
+        status = "cached" if "cache_hit" in warnings else "fallback" if "External LLM fallback" in warnings else "ok"
         print(
             f"[event-context] done {done}/{total} ({percent:5.1f}%) "
-            f"llm={llm_done}/{llm_total} symbol={symbol} date={timestamp} "
+            f"ctx={llm_done}/{llm_total} request={int(event.get('completed_llm_requests', 0))} symbol={symbol} date={timestamp} "
             f"news={news_count} events={event_count} status={status} elapsed={elapsed}",
             flush=True,
         )
@@ -103,6 +118,10 @@ def main() -> None:
         live=args.live and os.environ.get("ENABLE_EXTERNAL_LLM_CALLS", "").lower() in {"1", "true", "yes", "on"},
         offline_file=args.offline_file or None,
         cache_path=cache_path,
+        resume_from_cache=not args.no_resume_cache,
+        news_limit_per_context=args.news_limit_per_context,
+        llm_batch_size=args.llm_batch_size,
+        llm_min_interval_seconds=args.llm_min_interval_seconds,
         progress_callback=_progress_logger(args.progress_every),
     )
     raw_path = data_root / "interim" / "events" / "combined_market_events.csv"

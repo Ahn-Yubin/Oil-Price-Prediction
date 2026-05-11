@@ -5,9 +5,11 @@ import argparse
 import json
 import os
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
+from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
@@ -22,7 +24,14 @@ from market_ai.env import load_project_env
 load_project_env()
 
 from market_ai.config import PROJECT_DIR
-from market_ai.data.deep_dataset import DeepDataset, _time_split_indices, build_deep_dataset_from_frame, build_synthetic_deep_dataset, combine_auxiliary_feature_frames
+from market_ai.data.deep_dataset import (
+    DeepDataset,
+    _time_split_indices,
+    build_deep_dataset_from_frame,
+    build_synthetic_deep_dataset,
+    combine_auxiliary_feature_frames,
+    sort_samples_chronologically,
+)
 from market_ai.data.event_providers import EVENT_FILE_ENV_VARS, FileEventProvider
 from market_ai.data.market_panel import load_market_panel
 from market_ai.data.storage import read_table
@@ -69,6 +78,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--synthetic", action="store_true")
     parser.add_argument("--allow-synthetic-fallback", action="store_true")
     parser.add_argument("--metadata-only", action="store_true")
+    parser.add_argument("--progress-every-batches", type=int, default=10)
+    parser.add_argument("--no-progress", action="store_true")
     return parser.parse_args()
 
 
@@ -134,11 +145,145 @@ def _sample_time_bounds(dataset) -> tuple[str | None, str | None]:
     return min(values), max(values)
 
 
-def build_dataset(args: argparse.Namespace, symbols: list[str], config: DeepDatasetConfig):
+def _elapsed(seconds: object) -> str:
+    total = int(float(seconds or 0))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _print_training_progress(event: dict[str, object]) -> None:
+    phase = str(event.get("phase", ""))
+    elapsed = _elapsed(event.get("elapsed_seconds", 0))
+    if phase == "dataset_start":
+        print(
+            f"[deep-train] dataset start source={event.get('source')} symbols={event.get('symbols')} "
+            f"interval={event.get('interval')} lookback={event.get('lookback')} horizon={event.get('horizon')}",
+            flush=True,
+        )
+        return
+    if phase == "dataset_symbol_start":
+        print(
+            f"[deep-train] dataset symbol start {event.get('symbol')} "
+            f"({event.get('symbol_index')}/{event.get('symbol_count')}) elapsed={elapsed}",
+            flush=True,
+        )
+        return
+    if phase == "dataset_symbol_done":
+        print(
+            f"[deep-train] dataset symbol done {event.get('symbol')} "
+            f"({event.get('symbol_index')}/{event.get('symbol_count')}) samples={event.get('samples_added')} "
+            f"total_samples={event.get('total_samples')} elapsed={elapsed}",
+            flush=True,
+        )
+        return
+    if phase == "dataset_done":
+        print(
+            f"[deep-train] dataset done samples={event.get('samples')} "
+            f"train={event.get('n_train')} val={event.get('n_val')} test={event.get('n_test')} "
+            f"warnings={event.get('warnings_count')} elapsed={elapsed}",
+            flush=True,
+        )
+        return
+    if phase == "model_start":
+        print(f"[deep-train] model start {event.get('model_name')} elapsed={elapsed}", flush=True)
+        return
+    if phase == "train_start":
+        print(
+            f"[deep-train] train start model={event.get('model_name')} device={event.get('device')} "
+            f"epochs={event.get('epochs')} batches/epoch={event.get('train_batches')} "
+            f"train={event.get('n_train')} val={event.get('n_val')}",
+            flush=True,
+        )
+        return
+    if phase == "epoch_start":
+        print(
+            f"[deep-train] epoch start model={event.get('model_name')} "
+            f"{event.get('epoch')}/{event.get('epochs')} batches={event.get('train_batches')} elapsed={elapsed}",
+            flush=True,
+        )
+        return
+    if phase == "batch_done":
+        batch = int(event.get("batch", 0))
+        total = max(1, int(event.get("train_batches", 1)))
+        percent = batch / total * 100
+        print(
+            f"[deep-train] batch done model={event.get('model_name')} epoch={event.get('epoch')}/{event.get('epochs')} "
+            f"batch={batch}/{total} ({percent:5.1f}%) loss={float(event.get('batch_loss', float('nan'))):.6f} "
+            f"running={float(event.get('running_train_loss', float('nan'))):.6f} elapsed={elapsed}",
+            flush=True,
+        )
+        return
+    if phase == "epoch_done":
+        marker = "improved" if bool(event.get("improved")) else f"stale={event.get('stale_epochs')}"
+        print(
+            f"[deep-train] epoch done model={event.get('model_name')} {event.get('epoch')}/{event.get('epochs')} "
+            f"train_loss={float(event.get('train_loss', float('nan'))):.6f} "
+            f"val_loss={float(event.get('validation_loss', float('nan'))):.6f} "
+            f"best={float(event.get('best_validation_loss', float('nan'))):.6f} {marker} elapsed={elapsed}",
+            flush=True,
+        )
+        return
+    if phase == "early_stop":
+        print(
+            f"[deep-train] early stop model={event.get('model_name')} epoch={event.get('epoch')} "
+            f"patience={event.get('patience')} best={float(event.get('best_validation_loss', float('nan'))):.6f} elapsed={elapsed}",
+            flush=True,
+        )
+        return
+    if phase == "train_done":
+        print(
+            f"[deep-train] train done model={event.get('model_name')} epochs_ran={event.get('epochs_ran')} "
+            f"train_loss={float(event.get('train_loss', float('nan'))):.6f} "
+            f"val_loss={float(event.get('validation_loss', float('nan'))):.6f} elapsed={elapsed}",
+            flush=True,
+        )
+        return
+    if phase == "artifact_written":
+        print(
+            f"[deep-train] artifact written model={event.get('model_name')} "
+            f"artifact={event.get('artifact')} metadata={event.get('metadata')}",
+            flush=True,
+        )
+
+
+def build_dataset(
+    args: argparse.Namespace,
+    symbols: list[str],
+    config: DeepDatasetConfig,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
+):
+    started = time.monotonic()
     event_paths = _event_paths_from_args(args)
     event_provider = _event_provider_from_args(args, config)
+    source = "synthetic" if args.synthetic or args.quick_test else "processed" if getattr(args, "use_processed_data", False) else "yfinance"
+    if progress_callback:
+        progress_callback(
+            {
+                "phase": "dataset_start",
+                "source": source,
+                "symbols": ",".join(symbols),
+                "interval": args.interval,
+                "lookback": config.lookback,
+                "horizon": config.horizon,
+                "elapsed_seconds": 0.0,
+            }
+        )
     if args.synthetic or args.quick_test:
-        return build_synthetic_deep_dataset(config), {
+        dataset = build_synthetic_deep_dataset(config)
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "dataset_done",
+                    "samples": len(dataset.samples),
+                    "n_train": int(len(dataset.train_indices)),
+                    "n_val": int(len(dataset.validation_indices)),
+                    "n_test": int(len(dataset.test_indices)),
+                    "warnings_count": 0,
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            )
+        return dataset, {
             "source": "synthetic",
             "symbols_used": symbols,
             "warnings": [],
@@ -157,13 +302,36 @@ def build_dataset(args: argparse.Namespace, symbols: list[str], config: DeepData
         event_context_frame = read_table(args.event_context) if getattr(args, "event_context", "") else None
         samples = []
         warnings: list[str] = []
-        for symbol in symbols:
+        for idx, symbol in enumerate(symbols, start=1):
+            if progress_callback:
+                progress_callback(
+                    {
+                        "phase": "dataset_symbol_start",
+                        "symbol": symbol,
+                        "symbol_index": idx,
+                        "symbol_count": len(symbols),
+                        "elapsed_seconds": time.monotonic() - started,
+                    }
+                )
             symbol_panel = panel[panel["symbol"].astype(str) == symbol].copy()
             if symbol_panel.empty:
                 warnings.append(f"No processed market panel rows for {symbol}")
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "phase": "dataset_symbol_done",
+                            "symbol": symbol,
+                            "symbol_index": idx,
+                            "symbol_count": len(symbols),
+                            "samples_added": 0,
+                            "total_samples": len(samples),
+                            "elapsed_seconds": time.monotonic() - started,
+                        }
+                    )
                 continue
             symbol_panel = symbol_panel.rename(columns={"timestamp": "date"})
             try:
+                before = len(samples)
                 ds = build_deep_dataset_from_frame(
                     symbol=symbol,
                     interval=args.interval,
@@ -175,11 +343,38 @@ def build_dataset(args: argparse.Namespace, symbols: list[str], config: DeepData
                     event_context_frame=event_context_frame,
                 )
                 samples.extend(ds.samples)
+                added = len(samples) - before
             except Exception as exc:
                 warnings.append(f"{symbol}: {exc}")
+                added = 0
+            if progress_callback:
+                progress_callback(
+                    {
+                        "phase": "dataset_symbol_done",
+                        "symbol": symbol,
+                        "symbol_index": idx,
+                        "symbol_count": len(symbols),
+                        "samples_added": added,
+                        "total_samples": len(samples),
+                        "elapsed_seconds": time.monotonic() - started,
+                    }
+                )
         if not samples:
             raise RuntimeError(f"No usable processed samples were produced. Warnings: {warnings}")
+        samples = sort_samples_chronologically(samples)
         train_idx, val_idx, test_idx = _time_split_indices(len(samples), config.validation_ratio, config.test_ratio)
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "dataset_done",
+                    "samples": len(samples),
+                    "n_train": int(len(train_idx)),
+                    "n_val": int(len(val_idx)),
+                    "n_test": int(len(test_idx)),
+                    "warnings_count": len(warnings),
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            )
         return DeepDataset(samples=samples, train_indices=train_idx, validation_indices=val_idx, test_indices=test_idx), {
             "source": "processed",
             "symbols_used": symbols,
@@ -196,12 +391,36 @@ def build_dataset(args: argparse.Namespace, symbols: list[str], config: DeepData
         }
     samples = []
     warnings: list[str] = []
-    for symbol in symbols:
+    for idx, symbol in enumerate(symbols, start=1):
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "dataset_symbol_start",
+                    "symbol": symbol,
+                    "symbol_index": idx,
+                    "symbol_count": len(symbols),
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            )
         try:
             frame = _download_frame(symbol, args.interval)
             if frame is None:
                 warnings.append(f"No usable yfinance data for {symbol}")
+                added = 0
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "phase": "dataset_symbol_done",
+                            "symbol": symbol,
+                            "symbol_index": idx,
+                            "symbol_count": len(symbols),
+                            "samples_added": added,
+                            "total_samples": len(samples),
+                            "elapsed_seconds": time.monotonic() - started,
+                        }
+                    )
                 continue
+            before = len(samples)
             ds = build_deep_dataset_from_frame(
                 symbol=symbol,
                 interval=args.interval,
@@ -210,8 +429,22 @@ def build_dataset(args: argparse.Namespace, symbols: list[str], config: DeepData
                 event_provider=event_provider,
             )
             samples.extend(ds.samples)
+            added = len(samples) - before
         except Exception as exc:
             warnings.append(f"{symbol}: {exc}")
+            added = 0
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "dataset_symbol_done",
+                    "symbol": symbol,
+                    "symbol_index": idx,
+                    "symbol_count": len(symbols),
+                    "samples_added": added,
+                    "total_samples": len(samples),
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            )
     if not samples:
         if not args.allow_synthetic_fallback:
             raise RuntimeError(
@@ -227,7 +460,20 @@ def build_dataset(args: argparse.Namespace, symbols: list[str], config: DeepData
             "synthetic_used": True,
             "events_path": event_paths,
         }
+    samples = sort_samples_chronologically(samples)
     train_idx, val_idx, test_idx = _time_split_indices(len(samples), config.validation_ratio, config.test_ratio)
+    if progress_callback:
+        progress_callback(
+            {
+                "phase": "dataset_done",
+                "samples": len(samples),
+                "n_train": int(len(train_idx)),
+                "n_val": int(len(val_idx)),
+                "n_test": int(len(test_idx)),
+                "warnings_count": len(warnings),
+                "elapsed_seconds": time.monotonic() - started,
+            }
+        )
     return DeepDataset(samples=samples, train_indices=train_idx, validation_indices=val_idx, test_indices=test_idx), {
         "source": "yfinance",
         "symbols_used": symbols,
@@ -259,7 +505,17 @@ def _resolve_device(value: str) -> str:
     return "cpu"
 
 
-def train_one(model_name: str, args: argparse.Namespace, dataset, config: DeepDatasetConfig, data_report: dict[str, Any]) -> dict[str, Any]:
+def train_one(
+    model_name: str,
+    args: argparse.Namespace,
+    dataset,
+    config: DeepDatasetConfig,
+    data_report: dict[str, Any],
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
+) -> dict[str, Any]:
+    model_started = time.monotonic()
+    if progress_callback:
+        progress_callback({"phase": "model_start", "model_name": model_name, "elapsed_seconds": 0.0})
     if args.quick_test:
         artifact_dir = PROJECT_DIR / "artifacts" / "smoke" / "models"
         metadata_dir = PROJECT_DIR / "artifacts" / "smoke" / "metadata"
@@ -318,6 +574,8 @@ def train_one(model_name: str, args: argparse.Namespace, dataset, config: DeepDa
         patience=args.patience,
         device=_resolve_device(args.device),
         seed=args.seed,
+        progress_callback=progress_callback,
+        progress_every_batches=args.progress_every_batches,
     )
     metadata["metrics"] = {
         "train_loss": result.train_loss,
@@ -330,6 +588,16 @@ def train_one(model_name: str, args: argparse.Namespace, dataset, config: DeepDa
     metadata["deep_config"] = result.model.config_dict()
     save_deep_artifact(result.model, artifact_path, model_name=model_name, metadata=metadata)
     write_deep_metadata(metadata_path, model_name=model_name, artifact_path=artifact_path, metadata=metadata)
+    if progress_callback:
+        progress_callback(
+            {
+                "phase": "artifact_written",
+                "model_name": model_name,
+                "artifact": str(artifact_path.relative_to(PROJECT_DIR)),
+                "metadata": str(metadata_path.relative_to(PROJECT_DIR)),
+                "elapsed_seconds": time.monotonic() - model_started,
+            }
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     report_json = output_dir / f"deep_training_{model_name}_{args.interval}.json"
     report_json.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -354,6 +622,7 @@ def train_one(model_name: str, args: argparse.Namespace, dataset, config: DeepDa
 
 def main() -> None:
     args = parse_args()
+    progress_callback = None if args.no_progress else _print_training_progress
     symbols = resolve_symbols(args)
     horizon = args.horizon or DEFAULT_HORIZON[args.interval]
     lookback = args.lookback or DEFAULT_LOOKBACK[args.interval]
@@ -374,9 +643,9 @@ def main() -> None:
         min_history=lookback,
         seed=args.seed,
     )
-    dataset, data_report = build_dataset(args, symbols, config)
+    dataset, data_report = build_dataset(args, symbols, config, progress_callback=progress_callback)
     model_names = ["deep_lstm_tcn_fusion", "llm_context_seq_moe"] if args.model == "both" else [args.model]
-    reports = [train_one(model_name, args, dataset, config, data_report) for model_name in model_names]
+    reports = [train_one(model_name, args, dataset, config, data_report, progress_callback=progress_callback) for model_name in model_names]
     print(json.dumps({"trained": model_names, "reports": reports}, ensure_ascii=False, indent=2))
 
 

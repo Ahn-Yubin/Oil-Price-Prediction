@@ -9,7 +9,9 @@ import pandas as pd
 
 from market_ai.config import Settings, get_settings
 from market_ai.constants import INTERVAL_TO_HORIZON
+from market_ai.data.deep_dataset import combine_auxiliary_feature_frames
 from market_ai.data.event_providers import FileEventProvider
+from market_ai.data.storage import read_table
 from market_ai.modeling.deep.availability import deep_artifact_availability
 from market_ai.modeling.deep.inference import predict_deep_quantiles
 
@@ -57,6 +59,43 @@ def _resolve_artifact_path(model_name: str, interval: str, horizon: int, model_d
     return availability.artifact_path
 
 
+@lru_cache(maxsize=4)
+def _load_processed_event_context(data_dir: str) -> pd.DataFrame | None:
+    path = Path(data_dir) / "processed" / "event_context" / "event_context_daily.csv"
+    if not path.exists():
+        return None
+    try:
+        return read_table(path)
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=4)
+def _load_processed_market_panel(data_dir: str, interval: str) -> pd.DataFrame | None:
+    root = Path(data_dir) / "processed" / "market_panel" / interval
+    for name in ("panel.parquet", "panel.csv"):
+        path = root / name
+        if path.exists():
+            try:
+                return read_table(path)
+            except Exception:
+                return None
+    return None
+
+
+@lru_cache(maxsize=4)
+def _load_processed_auxiliary(data_dir: str) -> pd.DataFrame | None:
+    root = Path(data_dir) / "processed" / "oil_fundamentals"
+    try:
+        return combine_auxiliary_feature_frames(
+            oil_fundamentals=read_table(root / "eia_weekly.csv") if (root / "eia_weekly.csv").exists() else None,
+            cot=read_table(root / "cftc_cot_weekly.csv") if (root / "cftc_cot_weekly.csv").exists() else None,
+            cme_curve=read_table(root / "cme_curve_daily.csv") if (root / "cme_curve_daily.csv").exists() else None,
+        )
+    except Exception:
+        return None
+
+
 def forecast_with_deep_model(
     *,
     model_name: str,
@@ -76,6 +115,9 @@ def forecast_with_deep_model(
     except Exception as exc:
         raise DeepModelUnavailable(str(exc)) from exc
     frame = candles if candles is not None else _frame_from_close(close)
+    event_context_frame = _load_processed_event_context(str(settings.data_dir)) if settings.enable_llm_context else None
+    market_panel = _load_processed_market_panel(str(settings.data_dir), interval)
+    auxiliary_frame = _load_processed_auxiliary(str(settings.data_dir))
     try:
         prediction = predict_deep_quantiles(
             artifact_path=artifact_path,
@@ -84,6 +126,9 @@ def forecast_with_deep_model(
             interval=interval,
             horizon=model_horizon,
             event_provider=FileEventProvider.from_env() if settings.enable_llm_context else None,
+            event_context_frame=event_context_frame,
+            auxiliary_frame=auxiliary_frame,
+            market_panel=market_panel,
             device="cpu",
         )
     except Exception as exc:

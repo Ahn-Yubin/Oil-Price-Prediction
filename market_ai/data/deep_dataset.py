@@ -45,6 +45,10 @@ class DeepDataset:
         }
 
 
+def sort_samples_chronologically(samples: list[DeepLearningSample]) -> list[DeepLearningSample]:
+    return sorted(samples, key=lambda sample: (pd.Timestamp(sample.as_of_time), sample.symbol))
+
+
 def _normalize_candles(candles: pd.DataFrame) -> pd.DataFrame:
     frame = candles.copy()
     if "date" not in frame.columns:
@@ -52,7 +56,7 @@ def _normalize_candles(candles: pd.DataFrame) -> pd.DataFrame:
             frame["date"] = pd.to_datetime(frame["time"], unit="s", utc=True)
         else:
             frame["date"] = pd.date_range("2000-01-01", periods=len(frame), freq="D", tz="UTC")
-    frame["date"] = pd.to_datetime(frame["date"], errors="coerce", utc=True)
+    frame["date"] = _utc_ns(pd.to_datetime(frame["date"], errors="coerce", utc=True))
     required = ["open", "high", "low", "close"]
     missing = set(required).difference(frame.columns)
     if missing:
@@ -81,9 +85,13 @@ def _normalize_feature_time_frame(frame: pd.DataFrame | None) -> pd.DataFrame | 
         return None
     out = frame.copy()
     col = _available_time_column(out)
-    out["feature_available_at"] = pd.to_datetime(out[col], errors="coerce", utc=True)
+    out["feature_available_at"] = _utc_ns(pd.to_datetime(out[col], errors="coerce", utc=True))
     out = out.dropna(subset=["feature_available_at"]).sort_values("feature_available_at")
     return out.reset_index(drop=True)
+
+
+def _utc_ns(values) -> pd.Series:
+    return pd.Series(values).dt.tz_convert("UTC").astype("datetime64[ns, UTC]")
 
 
 def _standardize(values: pd.Series) -> pd.Series:
@@ -141,7 +149,7 @@ def _first_numeric(row: pd.Series, candidates: tuple[str, ...], default: float =
 def _build_auxiliary_cross_asset_matrix(frame: pd.DataFrame, symbol: str, auxiliary_frame: pd.DataFrame | None) -> np.ndarray:
     if auxiliary_frame is None or auxiliary_frame.empty:
         return empty_cross_asset_window(len(frame))
-    left = pd.DataFrame({"date": pd.to_datetime(frame["date"], errors="coerce", utc=True)})
+    left = pd.DataFrame({"date": _utc_ns(pd.to_datetime(frame["date"], errors="coerce", utc=True))})
     right = _normalize_feature_time_frame(auxiliary_frame)
     if right is None or right.empty:
         return empty_cross_asset_window(len(frame))
@@ -173,7 +181,7 @@ def _build_market_panel_cross_asset_matrix(frame: pd.DataFrame, symbol: str, mar
     panel = market_panel.copy()
     if "timestamp" not in panel.columns or "symbol" not in panel.columns or "close" not in panel.columns:
         return None
-    panel["timestamp"] = pd.to_datetime(panel["timestamp"], errors="coerce", utc=True)
+    panel["timestamp"] = _utc_ns(pd.to_datetime(panel["timestamp"], errors="coerce", utc=True))
     panel["close"] = pd.to_numeric(panel["close"], errors="coerce")
     pivot = panel.dropna(subset=["timestamp", "symbol", "close"]).pivot_table(index="timestamp", columns="symbol", values="close", aggfunc="last").sort_index()
     if symbol not in pivot.columns or len(pivot.columns) < 2:
@@ -190,7 +198,7 @@ def _build_market_panel_cross_asset_matrix(frame: pd.DataFrame, symbol: str, mar
             "related_rolling_corr": rolling_corr.reindex(related_return.index).to_numpy(),
         }
     )
-    left = pd.DataFrame({"date": pd.to_datetime(frame["date"], errors="coerce", utc=True)})
+    left = pd.DataFrame({"date": _utc_ns(pd.to_datetime(frame["date"], errors="coerce", utc=True))})
     merged = pd.merge_asof(left.sort_values("date"), target.sort_values("feature_available_at"), left_on="date", right_on="feature_available_at", direction="backward")
     arr = np.zeros((len(merged), len(CROSS_ASSET_FEATURE_COLUMNS)), dtype=np.float32)
     arr[:, CROSS_ASSET_FEATURE_COLUMNS.index("related_returns")] = pd.to_numeric(merged["related_returns"], errors="coerce").fillna(0.0).to_numpy(dtype=np.float32)
@@ -226,7 +234,8 @@ def _event_context_frame_vector(
         frame = frame[frame["symbol"].astype(str).str.upper().isin([symbol_upper, "ALL", "*"])]
     if frame.empty:
         return None
-    left = pd.DataFrame({"date": [pd.Timestamp(as_of_time).tz_convert("UTC") if pd.Timestamp(as_of_time).tzinfo else pd.Timestamp(as_of_time, tz="UTC")]})
+    ts = pd.Timestamp(as_of_time).tz_convert("UTC") if pd.Timestamp(as_of_time).tzinfo else pd.Timestamp(as_of_time, tz="UTC")
+    left = pd.DataFrame({"date": _utc_ns(pd.to_datetime([ts], utc=True))})
     merged = pd.merge_asof(left, frame.sort_values("feature_available_at"), left_on="date", right_on="feature_available_at", direction="backward")
     if merged.empty or pd.isna(merged.loc[0, "feature_available_at"]):
         return None
@@ -375,6 +384,7 @@ def build_synthetic_deep_dataset(config: DeepDatasetConfig) -> DeepDataset:
     for symbol, frame in zip(config.symbols, frames):
         ds = build_deep_dataset_from_frame(symbol=symbol, interval=config.interval, candles=frame, config=config, event_provider=NullEventProvider())
         all_samples.extend(ds.samples)
+    all_samples = sort_samples_chronologically(all_samples)
     if config.max_samples is not None and len(all_samples) > config.max_samples:
         all_samples = all_samples[-int(config.max_samples) :]
     train_idx, val_idx, test_idx = _time_split_indices(len(all_samples), config.validation_ratio, config.test_ratio)

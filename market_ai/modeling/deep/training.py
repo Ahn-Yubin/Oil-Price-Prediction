@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -76,9 +78,12 @@ def train_deep_model(
     patience: int = 3,
     device: str = "cpu",
     seed: int = 42,
+    progress_callback: Callable[[dict[str, object]], None] | None = None,
+    progress_every_batches: int = 10,
 ) -> TrainingResult:
     if not dataset.samples:
         raise ValueError("Dataset has no samples")
+    started = time.monotonic()
     torch.manual_seed(seed)
     np.random.seed(seed)
     resolved_device = torch.device(device)
@@ -87,16 +92,44 @@ def train_deep_model(
     train_loader = _loader(dataset, dataset.train_indices, batch_size, shuffle=True)
     val_indices = dataset.validation_indices if len(dataset.validation_indices) else dataset.test_indices
     val_loader = _loader(dataset, val_indices, batch_size, shuffle=False)
+    total_epochs = max(1, int(epochs))
+    total_batches = len(train_loader)
+    progress_step = max(1, int(progress_every_batches))
+    if progress_callback:
+        progress_callback(
+            {
+                "phase": "train_start",
+                "model_name": model_name,
+                "device": str(resolved_device),
+                "epochs": total_epochs,
+                "batch_size": batch_size,
+                "train_batches": total_batches,
+                "n_train": int(len(dataset.train_indices)),
+                "n_val": int(len(val_indices)),
+                "elapsed_seconds": 0.0,
+            }
+        )
     best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
     best_val = float("inf")
     last_train = float("nan")
     stale = 0
     epochs_ran = 0
-    for epoch in range(max(1, int(epochs))):
+    for epoch in range(total_epochs):
         epochs_ran = epoch + 1
         model.train()
         batch_losses: list[float] = []
-        for xb, xc, xe, xs, y, yd, yv in train_loader:
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "epoch_start",
+                    "model_name": model_name,
+                    "epoch": epochs_ran,
+                    "epochs": total_epochs,
+                    "train_batches": total_batches,
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            )
+        for batch_idx, (xb, xc, xe, xs, y, yd, yv) in enumerate(train_loader, start=1):
             xb, xc, xe, xs, y, yd, yv = xb.to(resolved_device), xc.to(resolved_device), xe.to(resolved_device), xs.to(resolved_device), y.to(resolved_device), yd.to(resolved_device), yv.to(resolved_device)
             optimizer.zero_grad(set_to_none=True)
             out = model(xb, xc, xe, xs)
@@ -105,16 +138,69 @@ def train_deep_model(
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             batch_losses.append(float(loss.item()))
+            if progress_callback and (batch_idx == 1 or batch_idx == total_batches or batch_idx % progress_step == 0):
+                progress_callback(
+                    {
+                        "phase": "batch_done",
+                        "model_name": model_name,
+                        "epoch": epochs_ran,
+                        "epochs": total_epochs,
+                        "batch": batch_idx,
+                        "train_batches": total_batches,
+                        "batch_loss": float(loss.item()),
+                        "running_train_loss": float(np.mean(batch_losses)),
+                        "elapsed_seconds": time.monotonic() - started,
+                    }
+                )
         last_train = float(np.mean(batch_losses)) if batch_losses else float("nan")
         val_loss = _eval_loss(model, val_loader, resolved_device)
         comparable = val_loss if np.isfinite(val_loss) else last_train
+        improved = comparable < best_val
         if comparable < best_val:
             best_val = comparable
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
             stale = 0
         else:
             stale += 1
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "epoch_done",
+                    "model_name": model_name,
+                    "epoch": epochs_ran,
+                    "epochs": total_epochs,
+                    "train_loss": last_train,
+                    "validation_loss": val_loss,
+                    "best_validation_loss": best_val,
+                    "improved": improved,
+                    "stale_epochs": stale,
+                    "elapsed_seconds": time.monotonic() - started,
+                }
+            )
+        if not improved:
             if stale >= patience:
+                if progress_callback:
+                    progress_callback(
+                        {
+                            "phase": "early_stop",
+                            "model_name": model_name,
+                            "epoch": epochs_ran,
+                            "patience": patience,
+                            "best_validation_loss": best_val,
+                            "elapsed_seconds": time.monotonic() - started,
+                        }
+                    )
                 break
     model.load_state_dict(best_state)
+    if progress_callback:
+        progress_callback(
+            {
+                "phase": "train_done",
+                "model_name": model_name,
+                "epochs_ran": epochs_ran,
+                "train_loss": last_train,
+                "validation_loss": best_val,
+                "elapsed_seconds": time.monotonic() - started,
+            }
+        )
     return TrainingResult(model=model.cpu(), train_loss=last_train, validation_loss=best_val, epochs_ran=epochs_ran)

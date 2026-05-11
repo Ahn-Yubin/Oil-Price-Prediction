@@ -11,11 +11,44 @@ The current processed datasets are organized as follows.
 | Market panel | `data/processed/market_panel/{interval}/panel.csv` | yfinance-based OHLCV multi-symbol panel for `1d`, `1h`, `30m`, and `15m` | Price windows for all forecast models |
 | EIA petroleum | `data/processed/oil_fundamentals/eia_weekly.csv` | EIA petroleum weekly bulk supply/inventory series | Oil fundamental features |
 | CFTC COT | `data/processed/oil_fundamentals/cftc_cot_weekly.csv` | CFTC Commitment of Traders positioning | Managed money/commercial positioning features |
+| Macro panel | `data/processed/macro_panel/fred_daily_wide.csv` | FRED macro rates/indices daily wide panel | Macro/rates cross-asset features |
 | Event context | `data/processed/event_context/event_context_daily.csv` | Daily context vectors generated from news/events | `llm_context_seq_moe` event/context input |
-| Raw news | `data/raw/news/public_market_news.csv` | Public news text from Yahoo Finance RSS/GDELT | LLM context input |
+| Raw news | `data/raw/news/public_market_news.csv` | Public news text from Yahoo Finance RSS, Google News RSS, and GDELT | LLM context input |
 | Manifest | `data/manifests/data_inventory.json` | Dataset rows, date ranges, sources, and point-in-time safety flags | Data monitoring and reproducibility |
 
 EIA/CFTC data is weekly and is forward-filled into daily samples using conservative availability timestamps. News and event context rows after the sample origin are not used.
+
+## Current Symbol Universe
+
+The current `research_core` universe contains 18 symbols.
+
+| Category | Symbols | Count | Use |
+| --- | --- | ---: | --- |
+| Energy futures/ETF/sector | `CL=F`, `BZ=F`, `NG=F`, `RB=F`, `HO=F`, `USO`, `XLE` | 7 | Crude oil, Brent, natural gas, refined products, energy ETF, and sector proxies |
+| Metals | `GC=F`, `SI=F`, `HG=F` | 3 | Gold, silver, and copper macro/commodity cross-asset signals |
+| FX/macro | `DX-Y.NYB`, `EURUSD=X`, `USDKRW=X`, `JPY=X` | 4 | Dollar index and major FX proxies |
+| Equity/volatility | `SPY`, `QQQ`, `^GSPC`, `^VIX` | 4 | Risk-on/off, equity market, and volatility regime proxies |
+
+Current dataset sizes:
+
+| Dataset | Rows | Date Range | Notes |
+| --- | ---: | --- | --- |
+| `market_panel/1d` | 45,523 | 2016-05-09 ~ 2026-05-08 | 18 symbols, enough for 10-year daily experiments |
+| `market_panel/1h` | 208,056 | 2023-06-05 ~ 2026-05-04 | Intraday 1h |
+| `market_panel/30m` | 33,765 | 2026-02-05 ~ 2026-05-04 | Short because of Yahoo interval limits |
+| `market_panel/15m` | 67,207 | 2026-02-05 ~ 2026-05-04 | Short because of Yahoo interval limits |
+| `eia_weekly` | 15,966 | 1982-08-25 ~ 2026-05-11 | Petroleum supply/inventory data |
+| `cftc_cot_weekly` | 3,776 | 2016-01-08 ~ 2026-05-10 | Positioning data |
+| `macro_panel/fred_daily_wide` | 16,402 | 1962-01-02 ~ 2026-05-01 | Macro rates/indices |
+| `public_market_news` | 2,240 | 2026-01-11 ~ 2026-05-11 | Yahoo Finance RSS 340 + Google News RSS 1,900 |
+| `event_context_daily` | 1,080 | 2026-03-13 ~ 2026-05-11 | Existing LLM context; the new Google News rows are not fully reflected yet |
+
+Sufficiency assessment:
+
+- Daily price, supply, inventory, and positioning data are enough to run h8/h45 experiments.
+- 30m/15m data is too short for reliable deep model generalization tests.
+- News volume increased from 340 rows to 2,240 rows, but it still starts in January 2026 and is too short for long-regime learning.
+- `event_context_daily` has not yet been rebuilt from the full 2,240-row news file. Because the LLM API limit is 500 calls per day, this should be processed across several runs using cache/resume.
 
 ## Missing Or Limited Data
 
@@ -38,7 +71,7 @@ Provider implementations live in `market_ai/data/providers`.
 - `cftc_provider.py`: CFTC COT ZIP/CSV/manual CSV normalization
 - `cme_provider.py`: CME settlement manual/URL CSV normalization
 - `fred_provider.py`: FRED macro series ingestion
-- `public_news_provider.py`: Yahoo RSS/GDELT public news ingestion
+- `public_news_provider.py`: Yahoo RSS, Google News RSS, and GDELT public news ingestion
 
 Providers separate raw cache and processed output. Failures are reported through status/warnings, and production does not create synthetic fallback data.
 
@@ -106,6 +139,24 @@ External LLM context such as Google Gemma/Gemini:
   --mode google_generative \
   --live
 ```
+
+When the LLM API has a daily quota, processed rows are appended immediately to `llm_context_cache.jsonl`. Re-running the same command skips rows with the same `symbol/date/news_hash`.
+
+```bash
+.venv/bin/python scripts/data/build_event_context.py \
+  --news-path data/raw/news/public_market_news.csv \
+  --symbols CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F,DX-Y.NYB,EURUSD=X,USDKRW=X,JPY=X,SPY,QQQ,^GSPC,^VIX,XLE,USO \
+  --mode google_generative \
+  --live \
+  --start 2026-01-11 \
+  --end 2026-05-11 \
+  --news-limit-per-context 10 \
+  --llm-batch-size 10 \
+  --llm-min-interval-seconds 4.2 \
+  --progress-every 50
+```
+
+`--news-limit-per-context` controls how many recent news items are included in one `symbol/date` context. `--llm-batch-size` controls how many `symbol/date` contexts are encoded in one external LLM request. `--llm-min-interval-seconds` throttles requests to stay below RPM limits. Use `--no-resume-cache` only when forcing a full recomputation.
 
 ## Real Dataset Orchestration
 

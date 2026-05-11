@@ -34,9 +34,84 @@ price_t+h = current_price * exp(predicted_cumulative_log_return_h)
 
 EIA/CFTC/CME/event context는 `feature_available_at <= as_of_time` 조건을 만족할 때만 sample에 들어갑니다.
 
+## 입출력 Tensor 구조
+
+현재 artifact 기준 `1d`, `horizon=8`, `lookback=128`에서 deep model 입력과 출력은 다음과 같습니다.
+
+| Tensor | Shape | 의미 |
+| --- | --- | --- |
+| `x_price` | `[batch, 128, 23]` | 각 종목 자체 OHLCV에서 만든 가격/변동성/추세/분포 feature |
+| `x_cross_asset` | `[batch, 128, 6]` | 관련 자산 평균 수익률, rolling correlation, EIA/CFTC/CME 파생 proxy, missing indicator |
+| `x_event_context` | `[batch, 13]` | 뉴스/이벤트를 LLM 또는 local rule이 바꾼 context vector |
+| `x_static` | `[batch, 4]` | 현재가, 최근 실현변동성, lookback, horizon |
+| `quantiles` | `[batch, 8, 7]` | 5/10/25/50/75/90/95% volatility-scaled cumulative log return |
+| `prob_up` | `[batch, 8]` | 각 horizon step의 상승 방향 확률 |
+| `expected_volatility` | `[batch, 8]` | 각 step의 예상 변동성 |
+| `confidence` | `[batch, 1]` | 모델 내부 confidence score |
+
+예측 가격은 모델 출력인 scaled cumulative log return을 최근 실현변동성으로 되돌린 뒤 아래 식으로 복원합니다.
+
+```text
+predicted_cumulative_log_return_h = predicted_scaled_return_h * recent_realized_volatility
+predicted_price_t+h = current_price * exp(predicted_cumulative_log_return_h)
+```
+
+현재 학습 script가 생성하는 artifact의 기본 architecture 값은 다음과 같습니다.
+
+| 항목 | 현재 값 |
+| --- | --- |
+| `hidden_dim` | 48 |
+| `dropout` | 0.1 |
+| Quantile levels | 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95 |
+| LSTM | 1-layer, unidirectional `nn.LSTM(input_size=96, hidden_size=48, batch_first=True)` |
+| TCN | `Linear(96 -> 48)` 후 dilation 1/2/4/8 causal residual blocks |
+| TCN block | `CausalConv1d(48 -> 48, kernel=3, dilation=d)` x 2, `GELU`, `Dropout(0.1)`, residual `LayerNorm(48)` |
+| 공통 MLP | `Linear(input -> 48)`, `GELU`, `Dropout(0.1)`, `Linear(48 -> output)` |
+
+## 전체 Deep Forecast 흐름
+
+```mermaid
+flowchart LR
+    A["OHLCV candles"] --> B["x_price\n[batch, lookback, 23]"]
+    C["Market panel + EIA/CFTC/CME"] --> D["x_cross_asset\n[batch, lookback, 6]"]
+    E["News/Event files"] --> F["LLM/local event encoder"]
+    F --> G["x_event_context\n[batch, 13]"]
+    H["Current price / volatility / config"] --> I["x_static\n[batch, 4]"]
+    B --> J["Deep model"]
+    D --> J
+    G --> J
+    I --> J
+    J --> K["Quantile scaled return path\n[batch, horizon, 7]"]
+    J --> L["prob_up / expected_volatility / confidence"]
+    K --> M["Price reconstruction\nprice_t+h = price_t * exp(return_h)"]
+```
+
 ## DeepLstmTcnFusion
 
 `deep_lstm_tcn_fusion`은 가격 feature와 optional cross-asset feature를 projection한 뒤 causal LSTM encoder와 causal TCN encoder를 병렬로 사용합니다. Fusion gate는 LSTM/TCN representation, event context, static feature를 입력으로 받아 두 encoder를 섞습니다.
+
+```mermaid
+flowchart TB
+    XP["x_price [B,L,23]"] --> PP["Linear price_projection\n23 -> hidden"]
+    XC["x_cross_asset [B,L,6]"] --> CP["Linear cross_projection\n6 -> hidden"]
+    PP --> CAT["Concat sequence\n[B,L,hidden*2]"]
+    CP --> CAT
+    CAT --> LSTM["LSTM encoder\nlast hidden [B,hidden]"]
+    CAT --> TCN["Causal TCN encoder\n[B,hidden]"]
+    XE["x_event_context [B,13]"] --> CTX["Context concat\n[event_context + static]"]
+    XS["x_static [B,4]"] --> CTX
+    LSTM --> GATE["Fusion gate MLP\nsigmoid"]
+    TCN --> GATE
+    CTX --> GATE
+    LSTM --> FUSE["gate * LSTM + (1-gate) * TCN"]
+    TCN --> FUSE
+    CTX --> FILM["FiLM linear\ngamma,beta"]
+    FILM --> FUSE
+    FUSE --> Q["Quantile MLP\n[B,H,7]"]
+    FUSE --> P["Direction MLP\nprob_up [B,H]"]
+    FUSE --> V["Volatility MLP\nexpected_volatility [B,H]"]
+    FUSE --> C["Confidence MLP\n[B,1]"]
+```
 
 출력:
 
@@ -45,9 +120,49 @@ EIA/CFTC/CME/event context는 `feature_available_at <= as_of_time` 조건을 만
 - expected volatility
 - confidence
 
+레이어 구성:
+
+| 단계 | 구성 |
+| --- | --- |
+| Projection | `x_price: 23 -> 48`, `x_cross_asset: 6 -> 48` |
+| Sequence concat | `[B,128,48] + [B,128,48] -> [B,128,96]` |
+| LSTM encoder | `[B,128,96] -> last hidden [B,48]` |
+| TCN encoder | `[B,128,96] -> [B,48]`, dilation 1/2/4/8 causal residual stack |
+| Context conditioning | `x_event_context [B,13] + x_static [B,4] -> context [B,17]` |
+| Fusion gate | `MLP(48 + 48 + 17 -> 48)`, sigmoid 후 `gate * LSTM + (1-gate) * TCN` |
+| FiLM | `Linear(17 -> 96)`을 `gamma [B,48]`, `beta [B,48]`로 나눠 fused representation 조정 |
+| Heads | quantile `MLP(48 -> 56)` 후 `[B,8,7]`, direction `MLP(48 -> 8)`, volatility `MLP(48 -> 8)`, confidence `MLP(48+17 -> 1)` |
+
 ## LLMContextSeqMoE
 
 `llm_context_seq_moe`는 LSTM expert, TCN expert, baseline adapter, motif adapter를 가진 learned mixture-of-experts입니다.
+
+```mermaid
+flowchart TB
+    XP["x_price"] --> PP["price_projection"]
+    XC["x_cross_asset"] --> CP["cross_projection"]
+    PP --> SEQ["Concat sequence"]
+    CP --> SEQ
+    SEQ --> LSTM["LSTM encoder"]
+    SEQ --> TCN["TCN encoder"]
+    LSTM --> E1["LSTM expert quantiles"]
+    TCN --> E2["TCN expert quantiles"]
+    XS["x_static"] --> E3["Baseline adapter quantiles"]
+    XS --> E4["Motif adapter quantiles"]
+    XE["x_event_context"] --> GATE["Gating MLP softmax\n4 expert weights"]
+    XS --> GATE
+    LSTM --> GATE
+    TCN --> GATE
+    E1 --> MIX["Weighted sum of expert quantiles"]
+    E2 --> MIX
+    E3 --> MIX
+    E4 --> MIX
+    GATE --> MIX
+    MIX --> Q["Monotonic quantiles [B,H,7]"]
+    LSTM --> AUX["Direction/volatility heads"]
+    TCN --> AUX
+    XE --> CONF["Confidence head\nuncertainty-adjusted"]
+```
 
 LLM/event context의 역할:
 
@@ -60,6 +175,35 @@ LLM/event context가 하지 않는 일:
 - 가격 path 직접 생성
 - p50/p90 직접 생성
 - 시계열 모델 output overwrite
+
+레이어 구성:
+
+| 단계 | 구성 |
+| --- | --- |
+| Shared projection | `x_price: 23 -> 48`, `x_cross_asset: 6 -> 48`, concat 후 `[B,128,96]` |
+| Shared sequence encoder | LSTM last hidden `[B,48]`, TCN representation `[B,48]` |
+| Expert heads | LSTM expert `MLP(48 -> 56)`, TCN expert `MLP(48 -> 56)`, baseline adapter `MLP(4 -> 56)`, motif adapter `MLP(4 -> 56)` |
+| Gating network | `x_event_context [B,13] + x_static [B,4] + LSTM [B,48] + TCN [B,48] -> MLP(113 -> 4)`, softmax expert weight |
+| Mixture | 4개 expert `[B,8,7]`를 softmax weight로 가중합하고 quantile monotonicity를 `sort`로 보정 |
+| Auxiliary heads | direction/volatility는 `MLP(48+48+4 -> 8)`, confidence는 `MLP(13+4 -> 1)` 후 event uncertainty로 감산 |
+
+## Framework 판단
+
+현재 deep learning 코드는 이미 PyTorch 기반입니다.
+
+- 모델은 `torch.nn.Module`로 구현되어 있습니다.
+- LSTM은 `torch.nn.LSTM`을 사용합니다.
+- 학습은 `torch.utils.data.DataLoader`, `torch.optim.AdamW`, gradient clipping을 사용합니다.
+- Mac에서는 `--device mps`, NVIDIA 환경에서는 `--device cuda`로 가속할 수 있습니다.
+
+따라서 TensorFlow/Keras로 단순 이식한다고 빨라질 가능성은 낮습니다. 현재 병목은 framework가 아니라 다음 쪽입니다.
+
+- 뉴스/LLM event context 생성 속도와 API quota
+- 짧은 뉴스 history
+- walk-forward backtest에서 origin마다 deep inference dataset을 다시 만드는 비용
+- baseline 대비 충분히 강한 학습 신호 부족
+
+프레임워크 교체보다 효과가 큰 개선은 LLM context cache/resume, 장기 뉴스 데이터 확보, backtest inference cache, 더 엄격한 time split/coverage 평가입니다.
 
 ## Quantile과 Calibration
 

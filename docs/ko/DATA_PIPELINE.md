@@ -11,11 +11,44 @@
 | Market panel | `data/processed/market_panel/{interval}/panel.csv` | yfinance 기반 OHLCV multi-symbol panel. `1d`, `1h`, `30m`, `15m` interval 사용 | 모든 forecast model의 가격 window |
 | EIA petroleum | `data/processed/oil_fundamentals/eia_weekly.csv` | EIA petroleum weekly bulk에서 추출한 재고/수급 계열 | 원유 fundamental feature |
 | CFTC COT | `data/processed/oil_fundamentals/cftc_cot_weekly.csv` | CFTC Commitment of Traders 포지셔닝 | managed money/commercial positioning feature |
+| Macro panel | `data/processed/macro_panel/fred_daily_wide.csv` | FRED macro rates/indices daily wide panel | macro/rates cross-asset feature |
 | Event context | `data/processed/event_context/event_context_daily.csv` | 뉴스/이벤트를 daily context vector로 변환한 데이터 | `llm_context_seq_moe` event/context input |
-| Raw news | `data/raw/news/public_market_news.csv` | Yahoo Finance RSS/GDELT 등 공개 뉴스 원문 | LLM context 생성 입력 |
+| Raw news | `data/raw/news/public_market_news.csv` | Yahoo Finance RSS, Google News RSS, GDELT 등 공개 뉴스 원문 | LLM context 생성 입력 |
 | Manifest | `data/manifests/data_inventory.json` | dataset별 rows, 기간, source, point-in-time safety 기록 | 데이터 감시와 재현성 |
 
 EIA/CFTC는 weekly 데이터이므로 daily sample에는 보수적인 available timestamp 기준으로 forward-fill됩니다. 뉴스와 event context는 timestamp가 sample origin 이후인 행을 사용하지 않습니다.
+
+## 현재 수집 종목 Universe
+
+현재 `research_core` universe는 18개 종목입니다.
+
+| 분류 | 종목 | 개수 | 용도 |
+| --- | --- | ---: | --- |
+| Energy futures/ETF/sector | `CL=F`, `BZ=F`, `NG=F`, `RB=F`, `HO=F`, `USO`, `XLE` | 7 | 원유/브렌트/천연가스/정제유/에너지 ETF 및 섹터 proxy |
+| Metals | `GC=F`, `SI=F`, `HG=F` | 3 | 금/은/구리 macro 및 commodity cross-asset signal |
+| FX/macro | `DX-Y.NYB`, `EURUSD=X`, `USDKRW=X`, `JPY=X` | 4 | 달러, 주요 FX, 원화 proxy |
+| Equity/volatility | `SPY`, `QQQ`, `^GSPC`, `^VIX` | 4 | risk-on/off, 주식시장, 변동성 regime |
+
+현재 데이터 크기:
+
+| Dataset | Rows | 기간 | 비고 |
+| --- | ---: | --- | --- |
+| `market_panel/1d` | 45,523 | 2016-05-09 ~ 2026-05-08 | 18 symbols, 10년 daily 학습 가능 |
+| `market_panel/1h` | 208,056 | 2023-06-05 ~ 2026-05-04 | intraday 1h |
+| `market_panel/30m` | 33,765 | 2026-02-05 ~ 2026-05-04 | Yahoo interval 제한으로 짧음 |
+| `market_panel/15m` | 67,207 | 2026-02-05 ~ 2026-05-04 | Yahoo interval 제한으로 짧음 |
+| `eia_weekly` | 15,966 | 1982-08-25 ~ 2026-05-11 | 원유 수급/재고 |
+| `cftc_cot_weekly` | 3,776 | 2016-01-08 ~ 2026-05-10 | 포지셔닝 |
+| `macro_panel/fred_daily_wide` | 16,402 | 1962-01-02 ~ 2026-05-01 | macro rates/indices |
+| `public_market_news` | 2,240 | 2026-01-11 ~ 2026-05-11 | Yahoo Finance RSS 340 + Google News RSS 1,900 |
+| `event_context_daily` | 1,080 | 2026-03-13 ~ 2026-05-11 | 아직 새 Google News 전체가 반영되지 않은 기존 LLM context |
+
+충분성 판단:
+
+- 1d 가격/수급/포지셔닝 데이터는 h8/h45 실험을 시작하기에 충분합니다.
+- 30m/15m 데이터는 기간이 너무 짧아 deep model 일반화 평가에는 부족합니다.
+- 뉴스는 340건에서 2,240건으로 늘었지만 기간이 2026년 1월 이후라 장기 regime 학습에는 여전히 부족합니다.
+- `event_context_daily`는 아직 2,240건 뉴스 전체를 반영하지 못했습니다. LLM API 일일 500회 한도 때문에 cache/resume 방식으로 여러 날에 나눠 처리해야 합니다.
 
 ## 아직 부족하거나 제한적인 데이터
 
@@ -38,7 +71,7 @@ Provider 구현은 `market_ai/data/providers`에 있습니다.
 - `cftc_provider.py`: CFTC COT ZIP/CSV/manual CSV 정규화
 - `cme_provider.py`: CME settlement manual/URL CSV 정규화
 - `fred_provider.py`: FRED macro series 수집
-- `public_news_provider.py`: Yahoo RSS/GDELT public news 수집
+- `public_news_provider.py`: Yahoo RSS, Google News RSS, GDELT public news 수집
 
 Provider는 raw cache와 processed output을 분리합니다. 실패하면 status/warning을 기록하고 production에서 synthetic fallback을 만들지 않습니다.
 
@@ -106,6 +139,24 @@ Google Gemma/Gemini 같은 external LLM context:
   --mode google_generative \
   --live
 ```
+
+LLM API 한도가 있는 경우 `llm_context_cache.jsonl`에 처리 결과가 행 단위로 즉시 append됩니다. 같은 명령을 다시 실행하면 `symbol/date/news_hash`가 같은 행은 cache hit로 건너뜁니다.
+
+```bash
+.venv/bin/python scripts/data/build_event_context.py \
+  --news-path data/raw/news/public_market_news.csv \
+  --symbols CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F,DX-Y.NYB,EURUSD=X,USDKRW=X,JPY=X,SPY,QQQ,^GSPC,^VIX,XLE,USO \
+  --mode google_generative \
+  --live \
+  --start 2026-01-11 \
+  --end 2026-05-11 \
+  --news-limit-per-context 10 \
+  --llm-batch-size 10 \
+  --llm-min-interval-seconds 4.2 \
+  --progress-every 50
+```
+
+`--news-limit-per-context`는 한 `symbol/date` context에 넣는 최근 뉴스 개수입니다. `--llm-batch-size`는 여러 `symbol/date` context를 한 external LLM request로 묶는 개수입니다. `--llm-min-interval-seconds`는 RPM 한도를 넘기지 않기 위한 request 간 최소 대기 시간입니다. 새로 전부 다시 계산하고 싶을 때만 `--no-resume-cache`를 사용합니다.
 
 ## Real Dataset Orchestration
 

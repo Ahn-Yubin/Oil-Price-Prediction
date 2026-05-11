@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from market_ai.data.deep_dataset import build_deep_dataset_from_frame, synthetic_ohlcv
+from market_ai.data.deep_dataset import build_deep_dataset_from_frame, build_synthetic_deep_dataset, synthetic_ohlcv
 from market_ai.data.event_providers import FileEventProvider
 from market_ai.schemas.deep_learning import DeepDatasetConfig
 
@@ -15,6 +15,30 @@ def test_synthetic_deep_dataset_shapes_and_split():
     assert tensors["y_vol_scaled_cum_return"].shape[1] == 5
     assert max(dataset.train_indices) < min(dataset.validation_indices)
     assert max(dataset.validation_indices) < min(dataset.test_indices)
+
+
+def test_multi_symbol_deep_dataset_split_is_chronological_not_symbol_blocked():
+    config = DeepDatasetConfig(
+        interval="1d",
+        symbols=["CL=F", "BZ=F"],
+        lookback=20,
+        horizon=4,
+        min_history=20,
+        max_samples=60,
+    )
+    dataset = build_synthetic_deep_dataset(config)
+
+    def split_times(indices):
+        return [pd.Timestamp(dataset.samples[int(idx)].as_of_time) for idx in indices]
+
+    train_times = split_times(dataset.train_indices)
+    validation_times = split_times(dataset.validation_indices)
+    test_times = split_times(dataset.test_indices)
+    assert max(train_times) <= min(validation_times)
+    assert max(validation_times) <= min(test_times)
+    assert {dataset.samples[int(idx)].symbol for idx in dataset.train_indices} == {"CL=F", "BZ=F"}
+    assert {dataset.samples[int(idx)].symbol for idx in dataset.validation_indices} == {"CL=F", "BZ=F"}
+    assert {dataset.samples[int(idx)].symbol for idx in dataset.test_indices} == {"CL=F", "BZ=F"}
 
 
 def test_deep_dataset_zero_context_without_events():

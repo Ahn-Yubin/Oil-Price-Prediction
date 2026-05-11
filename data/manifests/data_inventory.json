@@ -1,11 +1,36 @@
 {
-  "generated_at": "2026-05-10T15:06:37.143128+00:00",
+  "generated_at": "2026-05-11T15:34:45.070994+00:00",
   "schema": "market_ai.data_inventory.v1",
   "datasets": [
     {
-      "dataset_name": "interim_combined_market_events",
+      "dataset_name": "external_events_sample_market_events",
+      "source": "external",
+      "path": "data/external/events/sample_market_events.csv",
+      "symbol_or_series": "CL=F,ALL,BZ=F",
+      "frequency": "weekly",
+      "start": "2025-01-03T13:30:00+00:00",
+      "end": "2025-01-14T08:00:00+00:00",
+      "rows": 3,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "event_type",
+        "directional_bias",
+        "impact_strength",
+        "uncertainty",
+        "source_quality_score",
+        "summary",
+        "source"
+      ],
+      "generated_at": "2026-05-11T06:39:19.368399+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "interim_events_combined_market_events",
       "source": "events",
-      "path": "/private/tmp/market-ai-progress-check/interim/events/combined_market_events.csv",
+      "path": "data/interim/events/combined_market_events.csv",
       "symbol_or_series": "HO=F,EURUSD=X,BZ=F,^VIX,JPY=X,RB=F,USO,XLE",
       "frequency": "intraday",
       "start": "2026-03-13T10:40:36+00:00",
@@ -22,20 +47,205 @@
         "summary",
         "source"
       ],
-      "generated_at": "2026-05-10T15:06:37.133335+00:00",
+      "generated_at": "2026-05-11T06:39:19.374408+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "interim_combined_market_events",
+      "source": "events",
+      "path": "data/interim/events/combined_market_events.csv",
+      "symbol_or_series": "EURUSD=X,USDKRW=X,JPY=X,DX-Y.NYB,GC=F,SI=F,HG=F,HO=F",
+      "frequency": null,
+      "start": "2026-01-11T08:00:00+00:00",
+      "end": "2026-05-11T06:32:39+00:00",
+      "rows": 2240,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "event_type",
+        "directional_bias",
+        "impact_strength",
+        "uncertainty",
+        "source_quality_score",
+        "summary",
+        "source"
+      ],
+      "generated_at": "2026-05-11T15:34:45.058438+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
     },
     {
-      "dataset_name": "processed_event_context_daily",
+      "dataset_name": "interim_events_public_news_fetch_status",
       "source": "events",
-      "path": "/private/tmp/market-ai-progress-check/processed/event_context/event_context_daily.csv",
-      "symbol_or_series": "CL=F",
+      "path": "data/interim/events/public_news_fetch_status.csv",
+      "symbol_or_series": null,
       "frequency": null,
-      "start": "2026-05-10T00:00:00+00:00",
-      "end": "2026-05-10T00:00:00+00:00",
-      "rows": 1,
+      "start": null,
+      "end": null,
+      "rows": 23,
+      "columns": [
+        "provider",
+        "topic_or_symbol",
+        "status",
+        "rows",
+        "error"
+      ],
+      "generated_at": "2026-05-11T06:39:19.375148+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "interim_fundamentals_fred_fetch_status",
+      "source": "fundamentals",
+      "path": "data/interim/fundamentals/fred_fetch_status.csv",
+      "symbol_or_series": "DCOILWTICO,DCOILBRENTEU,DHHNGSP,DTWEXBGS,DEXUSEU,DEXKOUS,DEXJPUS,DGS10",
+      "frequency": null,
+      "start": null,
+      "end": null,
+      "rows": 10,
+      "columns": [
+        "series_id",
+        "status",
+        "rows",
+        "error"
+      ],
+      "generated_at": "2026-05-11T06:39:19.376076+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "interim_market_fetch_status_research_core_1d",
+      "source": "market",
+      "path": "data/interim/market/fetch_status_research_core_1d.csv",
+      "symbol_or_series": "CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F",
+      "frequency": null,
+      "start": null,
+      "end": null,
+      "rows": 18,
+      "columns": [
+        "symbol",
+        "provider",
+        "interval",
+        "role",
+        "status",
+        "rows",
+        "path",
+        "error"
+      ],
+      "generated_at": "2026-05-11T06:39:19.377335+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "interim_market_missing_bars_oil_core_1d",
+      "source": "market",
+      "path": "data/interim/market/missing_bars_oil_core_1d.csv",
+      "symbol_or_series": "BZ=F,CL=F,HO=F,NG=F,RB=F",
+      "frequency": null,
+      "start": null,
+      "end": null,
+      "rows": 5682,
+      "columns": [
+        "symbol",
+        "interval",
+        "missing_timestamp"
+      ],
+      "generated_at": "2026-05-11T06:39:19.380678+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "interim_market_missing_bars_research_core_15m",
+      "source": "market",
+      "path": "data/interim/market/missing_bars_research_core_15m.csv",
+      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
+      "frequency": null,
+      "start": null,
+      "end": null,
+      "rows": 65991,
+      "columns": [
+        "symbol",
+        "interval",
+        "missing_timestamp"
+      ],
+      "generated_at": "2026-05-11T06:39:19.407092+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "interim_market_missing_bars_research_core_1d",
+      "source": "market",
+      "path": "data/interim/market/missing_bars_research_core_1d.csv",
+      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
+      "frequency": null,
+      "start": null,
+      "end": null,
+      "rows": 20204,
+      "columns": [
+        "symbol",
+        "interval",
+        "missing_timestamp"
+      ],
+      "generated_at": "2026-05-11T06:39:19.416334+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "interim_market_missing_bars_research_core_1h",
+      "source": "market",
+      "path": "data/interim/market/missing_bars_research_core_1h.csv",
+      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
+      "frequency": null,
+      "start": null,
+      "end": null,
+      "rows": 206579,
+      "columns": [
+        "symbol",
+        "interval",
+        "missing_timestamp"
+      ],
+      "generated_at": "2026-05-11T06:39:19.496371+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "interim_market_missing_bars_research_core_30m",
+      "source": "market",
+      "path": "data/interim/market/missing_bars_research_core_30m.csv",
+      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
+      "frequency": null,
+      "start": null,
+      "end": null,
+      "rows": 32835,
+      "columns": [
+        "symbol",
+        "interval",
+        "missing_timestamp"
+      ],
+      "generated_at": "2026-05-11T06:39:19.513669+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "processed_event_context_event_context_daily",
+      "source": "event_context",
+      "path": "data/processed/event_context/event_context_daily.csv",
+      "symbol_or_series": "CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F",
+      "frequency": null,
+      "start": "2026-03-13T00:00:00+00:00",
+      "end": "2026-05-11T00:00:00+00:00",
+      "rows": 1080,
       "columns": [
         "timestamp",
         "symbol",
@@ -61,280 +271,7 @@
         "geopolitical_event_score",
         "source_quality_score"
       ],
-      "generated_at": "2026-05-10T15:06:37.141300+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": true,
-      "notes": "llm_mode=local_rules; live=False"
-    },
-    {
-      "dataset_name": "external_events_sample_market_events",
-      "source": "external",
-      "path": "data/external/events/sample_market_events.csv",
-      "symbol_or_series": "CL=F,ALL,BZ=F",
-      "frequency": "weekly",
-      "start": "2025-01-03T13:30:00+00:00",
-      "end": "2025-01-14T08:00:00+00:00",
-      "rows": 3,
-      "columns": [
-        "timestamp",
-        "symbol",
-        "event_type",
-        "directional_bias",
-        "impact_strength",
-        "uncertainty",
-        "source_quality_score",
-        "summary",
-        "source"
-      ],
-      "generated_at": "2026-05-10T04:27:41.154486+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_events_combined_market_events",
-      "source": "events",
-      "path": "data/interim/events/combined_market_events.csv",
-      "symbol_or_series": "HO=F,EURUSD=X,BZ=F,^VIX,JPY=X,RB=F,USO,XLE",
-      "frequency": "intraday",
-      "start": "2026-03-13T10:40:36+00:00",
-      "end": "2026-05-10T03:16:50+00:00",
-      "rows": 340,
-      "columns": [
-        "timestamp",
-        "symbol",
-        "event_type",
-        "directional_bias",
-        "impact_strength",
-        "uncertainty",
-        "source_quality_score",
-        "summary",
-        "source"
-      ],
-      "generated_at": "2026-05-10T04:27:41.159263+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_combined_market_events",
-      "source": "events",
-      "path": "data/interim/events/combined_market_events.csv",
-      "symbol_or_series": "HO=F,EURUSD=X,BZ=F,^VIX,JPY=X,RB=F,USO,XLE",
-      "frequency": "intraday",
-      "start": "2026-03-13T10:40:36+00:00",
-      "end": "2026-05-10T03:16:50+00:00",
-      "rows": 340,
-      "columns": [
-        "timestamp",
-        "symbol",
-        "event_type",
-        "directional_bias",
-        "impact_strength",
-        "uncertainty",
-        "source_quality_score",
-        "summary",
-        "source"
-      ],
-      "generated_at": "2026-05-10T13:33:38.294849+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": true,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_events_public_news_fetch_status",
-      "source": "events",
-      "path": "data/interim/events/public_news_fetch_status.csv",
-      "symbol_or_series": null,
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 22,
-      "columns": [
-        "provider",
-        "topic_or_symbol",
-        "status",
-        "rows",
-        "error"
-      ],
-      "generated_at": "2026-05-10T04:27:41.160166+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_fundamentals_fred_fetch_status",
-      "source": "fundamentals",
-      "path": "data/interim/fundamentals/fred_fetch_status.csv",
-      "symbol_or_series": "DCOILWTICO,DCOILBRENTEU,DHHNGSP,DTWEXBGS,DEXUSEU,DEXKOUS,DEXJPUS,DGS10",
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 10,
-      "columns": [
-        "series_id",
-        "status",
-        "rows",
-        "error"
-      ],
-      "generated_at": "2026-05-10T04:27:41.161305+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_market_fetch_status_research_core_1d",
-      "source": "market",
-      "path": "data/interim/market/fetch_status_research_core_1d.csv",
-      "symbol_or_series": "CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F",
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 18,
-      "columns": [
-        "symbol",
-        "provider",
-        "interval",
-        "role",
-        "status",
-        "rows",
-        "path",
-        "error"
-      ],
-      "generated_at": "2026-05-10T04:27:41.162239+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_market_missing_bars_oil_core_1d",
-      "source": "market",
-      "path": "data/interim/market/missing_bars_oil_core_1d.csv",
-      "symbol_or_series": "BZ=F,CL=F,HO=F,NG=F,RB=F",
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 5682,
-      "columns": [
-        "symbol",
-        "interval",
-        "missing_timestamp"
-      ],
-      "generated_at": "2026-05-10T04:27:41.166057+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_market_missing_bars_research_core_15m",
-      "source": "market",
-      "path": "data/interim/market/missing_bars_research_core_15m.csv",
-      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 65991,
-      "columns": [
-        "symbol",
-        "interval",
-        "missing_timestamp"
-      ],
-      "generated_at": "2026-05-10T04:27:41.191733+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_market_missing_bars_research_core_1d",
-      "source": "market",
-      "path": "data/interim/market/missing_bars_research_core_1d.csv",
-      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 20204,
-      "columns": [
-        "symbol",
-        "interval",
-        "missing_timestamp"
-      ],
-      "generated_at": "2026-05-10T04:27:41.200920+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_market_missing_bars_research_core_1h",
-      "source": "market",
-      "path": "data/interim/market/missing_bars_research_core_1h.csv",
-      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 206579,
-      "columns": [
-        "symbol",
-        "interval",
-        "missing_timestamp"
-      ],
-      "generated_at": "2026-05-10T04:27:41.277594+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_market_missing_bars_research_core_30m",
-      "source": "market",
-      "path": "data/interim/market/missing_bars_research_core_30m.csv",
-      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 32835,
-      "columns": [
-        "symbol",
-        "interval",
-        "missing_timestamp"
-      ],
-      "generated_at": "2026-05-10T04:27:41.294093+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "processed_event_context_event_context_daily",
-      "source": "event_context",
-      "path": "data/processed/event_context/event_context_daily.csv",
-      "symbol_or_series": "CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F",
-      "frequency": null,
-      "start": "2026-03-13T00:00:00+00:00",
-      "end": "2026-05-10T00:00:00+00:00",
-      "rows": 1062,
-      "columns": [
-        "timestamp",
-        "symbol",
-        "feature_available_at",
-        "llm_mode",
-        "overall_bias",
-        "impact_score",
-        "uncertainty",
-        "event_count",
-        "explanation",
-        "warnings",
-        "directional_bias_score",
-        "impact_strength",
-        "time_decay",
-        "event_count_1d",
-        "event_count_3d",
-        "event_count_7d",
-        "bullish_event_score",
-        "bearish_event_score",
-        "macro_event_score",
-        "energy_event_score",
-        "geopolitical_event_score",
-        "source_quality_score"
-      ],
-      "generated_at": "2026-05-10T04:27:41.302548+00:00",
+      "generated_at": "2026-05-11T06:39:19.524035+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -345,9 +282,9 @@
       "path": "data/processed/event_context/event_context_daily.csv",
       "symbol_or_series": "CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F",
       "frequency": null,
-      "start": "2026-03-13T00:00:00+00:00",
+      "start": "2026-01-11T00:00:00+00:00",
       "end": "2026-05-11T00:00:00+00:00",
-      "rows": 1080,
+      "rows": 2178,
       "columns": [
         "timestamp",
         "symbol",
@@ -357,6 +294,7 @@
         "impact_score",
         "uncertainty",
         "event_count",
+        "llm_input_news_count",
         "explanation",
         "warnings",
         "directional_bias_score",
@@ -372,10 +310,10 @@
         "geopolitical_event_score",
         "source_quality_score"
       ],
-      "generated_at": "2026-05-10T13:33:38.302894+00:00",
+      "generated_at": "2026-05-11T15:34:45.069993+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
-      "notes": "llm_mode=openai_compatible; live=True"
+      "notes": "llm_mode=google_generative; live=True"
     },
     {
       "dataset_name": "processed_event_context_llm_context_cache",
@@ -384,15 +322,16 @@
       "symbol_or_series": "CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F",
       "frequency": null,
       "start": "2026-03-13T00:00:00+00:00",
-      "end": "2026-05-10T00:00:00+00:00",
-      "rows": 1062,
+      "end": "2026-05-11T00:00:00+00:00",
+      "rows": 1080,
       "columns": [
         "as_of_time",
         "symbol",
         "mode",
+        "input_news_count",
         "output"
       ],
-      "generated_at": "2026-05-10T04:27:43.659714+00:00",
+      "generated_at": "2026-05-11T06:39:23.818848+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -419,7 +358,7 @@
         "T10YIE",
         "VIXCLS"
       ],
-      "generated_at": "2026-05-10T04:27:41.341451+00:00",
+      "generated_at": "2026-05-11T06:39:19.565101+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -444,7 +383,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:41.507563+00:00",
+      "generated_at": "2026-05-11T06:39:19.769605+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -469,7 +408,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:41.620589+00:00",
+      "generated_at": "2026-05-11T06:39:20.074707+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -494,7 +433,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.132113+00:00",
+      "generated_at": "2026-05-11T06:39:21.098197+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -519,7 +458,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.221886+00:00",
+      "generated_at": "2026-05-11T06:39:21.241767+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -550,7 +489,7 @@
         "source",
         "feature_available_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.238654+00:00",
+      "generated_at": "2026-05-11T06:39:21.282649+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -589,7 +528,7 @@
         "imports_exports_spread",
         "feature_available_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.303739+00:00",
+      "generated_at": "2026-05-11T06:39:21.384698+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -618,7 +557,7 @@
         "as_of_time",
         "source"
       ],
-      "generated_at": "2026-05-10T04:27:42.308383+00:00",
+      "generated_at": "2026-05-11T06:39:21.391270+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -655,7 +594,7 @@
         "crude_exports_change",
         "imports_exports_spread"
       ],
-      "generated_at": "2026-05-10T04:27:42.319202+00:00",
+      "generated_at": "2026-05-11T06:39:21.407388+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -677,7 +616,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.542335+00:00",
+      "generated_at": "2026-05-11T06:39:21.818229+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -702,7 +641,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.558754+00:00",
+      "generated_at": "2026-05-11T06:39:21.863206+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -727,7 +666,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.573187+00:00",
+      "generated_at": "2026-05-11T06:39:21.904895+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -752,7 +691,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.587361+00:00",
+      "generated_at": "2026-05-11T06:39:21.958397+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -777,7 +716,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.604250+00:00",
+      "generated_at": "2026-05-11T06:39:22.017179+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -802,7 +741,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.618211+00:00",
+      "generated_at": "2026-05-11T06:39:22.056296+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -827,7 +766,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.632383+00:00",
+      "generated_at": "2026-05-11T06:39:22.103309+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -852,7 +791,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.646282+00:00",
+      "generated_at": "2026-05-11T06:39:22.142096+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -877,7 +816,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.663195+00:00",
+      "generated_at": "2026-05-11T06:39:22.189194+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -902,7 +841,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.677440+00:00",
+      "generated_at": "2026-05-11T06:39:22.229615+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -927,7 +866,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.686794+00:00",
+      "generated_at": "2026-05-11T06:39:22.249465+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -952,7 +891,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.702445+00:00",
+      "generated_at": "2026-05-11T06:39:22.288581+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -977,7 +916,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.717211+00:00",
+      "generated_at": "2026-05-11T06:39:22.324261+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1002,7 +941,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.724075+00:00",
+      "generated_at": "2026-05-11T06:39:22.344869+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1027,7 +966,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.740990+00:00",
+      "generated_at": "2026-05-11T06:39:22.388339+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1052,7 +991,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.748042+00:00",
+      "generated_at": "2026-05-11T06:39:22.408534+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1077,7 +1016,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.755226+00:00",
+      "generated_at": "2026-05-11T06:39:22.430552+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1102,7 +1041,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.762101+00:00",
+      "generated_at": "2026-05-11T06:39:22.449806+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1127,7 +1066,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.773152+00:00",
+      "generated_at": "2026-05-11T06:39:22.471357+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1152,7 +1091,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.781790+00:00",
+      "generated_at": "2026-05-11T06:39:22.489857+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1177,7 +1116,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.790637+00:00",
+      "generated_at": "2026-05-11T06:39:22.507955+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1202,7 +1141,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.799668+00:00",
+      "generated_at": "2026-05-11T06:39:22.523245+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1227,7 +1166,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.808598+00:00",
+      "generated_at": "2026-05-11T06:39:22.537873+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1252,7 +1191,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.817116+00:00",
+      "generated_at": "2026-05-11T06:39:22.551933+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1277,7 +1216,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.825824+00:00",
+      "generated_at": "2026-05-11T06:39:22.566487+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1302,7 +1241,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.835440+00:00",
+      "generated_at": "2026-05-11T06:39:22.580114+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1327,7 +1266,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.844282+00:00",
+      "generated_at": "2026-05-11T06:39:22.593539+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1352,7 +1291,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.852977+00:00",
+      "generated_at": "2026-05-11T06:39:22.606969+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1377,7 +1316,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.861495+00:00",
+      "generated_at": "2026-05-11T06:39:22.620182+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1402,7 +1341,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.869811+00:00",
+      "generated_at": "2026-05-11T06:39:22.633996+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1427,7 +1366,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.878074+00:00",
+      "generated_at": "2026-05-11T06:39:22.647049+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1452,7 +1391,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.886326+00:00",
+      "generated_at": "2026-05-11T06:39:22.659966+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1477,7 +1416,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.894877+00:00",
+      "generated_at": "2026-05-11T06:39:22.671930+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1502,7 +1441,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.903072+00:00",
+      "generated_at": "2026-05-11T06:39:22.683143+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1527,7 +1466,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.911251+00:00",
+      "generated_at": "2026-05-11T06:39:22.693902+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1552,7 +1491,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.919481+00:00",
+      "generated_at": "2026-05-11T06:39:22.705346+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1577,7 +1516,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.927609+00:00",
+      "generated_at": "2026-05-11T06:39:22.716649+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1602,7 +1541,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:42.964972+00:00",
+      "generated_at": "2026-05-11T06:39:22.759972+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1627,7 +1566,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.002359+00:00",
+      "generated_at": "2026-05-11T06:39:22.797359+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1652,7 +1591,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.042168+00:00",
+      "generated_at": "2026-05-11T06:39:22.840059+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1677,7 +1616,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.090713+00:00",
+      "generated_at": "2026-05-11T06:39:22.895344+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1702,7 +1641,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.128109+00:00",
+      "generated_at": "2026-05-11T06:39:22.939974+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1727,7 +1666,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.166035+00:00",
+      "generated_at": "2026-05-11T06:39:22.983673+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1752,7 +1691,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.202365+00:00",
+      "generated_at": "2026-05-11T06:39:23.026251+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1777,7 +1716,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.248108+00:00",
+      "generated_at": "2026-05-11T06:39:23.081575+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1802,7 +1741,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.285032+00:00",
+      "generated_at": "2026-05-11T06:39:23.127366+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1827,7 +1766,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.301028+00:00",
+      "generated_at": "2026-05-11T06:39:23.147182+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1852,7 +1791,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.337580+00:00",
+      "generated_at": "2026-05-11T06:39:23.199225+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1877,7 +1816,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.375071+00:00",
+      "generated_at": "2026-05-11T06:39:23.252724+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1902,7 +1841,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.391179+00:00",
+      "generated_at": "2026-05-11T06:39:23.274702+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1927,7 +1866,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.436051+00:00",
+      "generated_at": "2026-05-11T06:39:23.335535+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1952,7 +1891,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.451841+00:00",
+      "generated_at": "2026-05-11T06:39:23.355488+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1977,7 +1916,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.467484+00:00",
+      "generated_at": "2026-05-11T06:39:23.375914+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2002,7 +1941,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.482892+00:00",
+      "generated_at": "2026-05-11T06:39:23.396269+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2027,7 +1966,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.509898+00:00",
+      "generated_at": "2026-05-11T06:39:23.430463+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2052,7 +1991,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.518427+00:00",
+      "generated_at": "2026-05-11T06:39:23.441739+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2077,7 +2016,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.526573+00:00",
+      "generated_at": "2026-05-11T06:39:23.454808+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2102,7 +2041,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.534872+00:00",
+      "generated_at": "2026-05-11T06:39:23.467860+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2127,7 +2066,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.544622+00:00",
+      "generated_at": "2026-05-11T06:39:23.484460+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2152,7 +2091,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.552850+00:00",
+      "generated_at": "2026-05-11T06:39:23.500419+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2177,7 +2116,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.560869+00:00",
+      "generated_at": "2026-05-11T06:39:23.518824+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2202,7 +2141,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.569099+00:00",
+      "generated_at": "2026-05-11T06:39:23.539234+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2227,7 +2166,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.578672+00:00",
+      "generated_at": "2026-05-11T06:39:23.567277+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2252,7 +2191,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.587162+00:00",
+      "generated_at": "2026-05-11T06:39:23.592954+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2277,7 +2216,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.591329+00:00",
+      "generated_at": "2026-05-11T06:39:23.607892+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2302,7 +2241,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.599507+00:00",
+      "generated_at": "2026-05-11T06:39:23.632683+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2327,7 +2266,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.607627+00:00",
+      "generated_at": "2026-05-11T06:39:23.655789+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2352,7 +2291,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.611684+00:00",
+      "generated_at": "2026-05-11T06:39:23.667931+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2377,7 +2316,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.621115+00:00",
+      "generated_at": "2026-05-11T06:39:23.692549+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2402,7 +2341,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.625155+00:00",
+      "generated_at": "2026-05-11T06:39:23.706095+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2427,7 +2366,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.629119+00:00",
+      "generated_at": "2026-05-11T06:39:23.718141+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2452,7 +2391,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.633311+00:00",
+      "generated_at": "2026-05-11T06:39:23.729305+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2477,7 +2416,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.639562+00:00",
+      "generated_at": "2026-05-11T06:39:23.745588+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2486,11 +2425,11 @@
       "dataset_name": "raw_news_public_market_news",
       "source": "news",
       "path": "data/raw/news/public_market_news.csv",
-      "symbol_or_series": "HO=F,EURUSD=X,BZ=F,^VIX,JPY=X,RB=F,USO,XLE",
+      "symbol_or_series": "EURUSD=X,USDKRW=X,JPY=X,DX-Y.NYB,GC=F,SI=F,HG=F,HO=F",
       "frequency": null,
-      "start": "2026-03-13T10:40:36+00:00",
-      "end": "2026-05-10T03:16:50+00:00",
-      "rows": 340,
+      "start": "2026-01-11T08:00:00+00:00",
+      "end": "2026-05-11T06:32:39+00:00",
+      "rows": 2240,
       "columns": [
         "published_at",
         "symbol",
@@ -2500,7 +2439,7 @@
         "url",
         "retrieved_at"
       ],
-      "generated_at": "2026-05-10T04:27:43.642829+00:00",
+      "generated_at": "2026-05-11T06:39:23.779816+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null

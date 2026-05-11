@@ -162,15 +162,94 @@ def _sanitize_llm_context_data(data: Any) -> Any:
     cleaned["events"] = events
     if not isinstance(cleaned.get("event_embedding"), list):
         cleaned["event_embedding"] = []
+    if len(cleaned["event_embedding"]) < 13:
+        cleaned["event_embedding"] = _embedding_from_structured_context(cleaned)
     if not isinstance(cleaned.get("warnings"), list):
         cleaned["warnings"] = [str(cleaned["warnings"])] if cleaned.get("warnings") else []
     return cleaned
+
+
+def _embedding_from_structured_context(data: dict[str, Any]) -> list[float]:
+    events = [event for event in data.get("events") or [] if isinstance(event, dict)]
+    event_count = float(len(events))
+    impact = _coerce_score(data.get("impact_score"), 0.0)
+    uncertainty = _coerce_score(data.get("uncertainty"), 1.0)
+    if not events:
+        return [
+            _bias_numeric(data.get("overall_bias")),
+            impact,
+            uncertainty,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ]
+
+    weighted_bias = 0.0
+    bullish = 0.0
+    bearish = 0.0
+    macro = 0.0
+    energy = 0.0
+    geo = 0.0
+    total_weight = 0.0
+    time_decay = 0.0
+    for event in events:
+        event_impact = _coerce_score(event.get("impact_strength"), impact)
+        event_decay = _coerce_score(event.get("time_decay"), 1.0)
+        weight = max(event_impact, 0.05) * max(event_decay, 0.05)
+        bias = _bias_numeric(event.get("directional_bias"))
+        event_type = str(event.get("event_type") or "").lower()
+        total_weight += weight
+        weighted_bias += bias * weight
+        bullish += max(bias, 0.0) * weight
+        bearish += max(-bias, 0.0) * weight
+        time_decay += event_decay
+        if "macro" in event_type or "economic" in event_type or "policy" in event_type:
+            macro += weight
+        if "energy" in event_type or "oil" in event_type or "supply" in event_type or "demand" in event_type:
+            energy += weight
+        if "geo" in event_type or "war" in event_type or "sanction" in event_type:
+            geo += weight
+    denom = max(total_weight, 1e-8)
+    return [
+        float(weighted_bias / denom),
+        impact,
+        uncertainty,
+        min(float(time_decay / max(event_count, 1.0)), 1.0),
+        min(event_count, 1.0),
+        min(event_count, 3.0),
+        min(event_count, 7.0),
+        float(bullish / denom),
+        float(bearish / denom),
+        float(macro / denom),
+        float(energy / denom),
+        float(geo / denom),
+        0.65,
+    ]
+
+
+def _bias_numeric(value: Any) -> float:
+    normalized = _normalize_bias(value)
+    if normalized == "bullish":
+        return 1.0
+    if normalized == "bearish":
+        return -1.0
+    return 0.0
 
 
 class BaseLLMEventEncoder(ABC):
     @abstractmethod
     def encode_events(self, context: MarketContextInput) -> LLMContextOutput:
         """Encode market context into structured event scores, not numeric price forecasts."""
+
+    def encode_event_batch(self, contexts: list[MarketContextInput]) -> list[LLMContextOutput]:
+        return [self.encode_events(context) for context in contexts]
 
 
 class NullLLMEventEncoder(BaseLLMEventEncoder):
@@ -368,6 +447,19 @@ class GoogleGenerativeLLMEventEncoder(BaseLLMEventEncoder):
             f"MarketContextInput JSON:\n{context.model_dump_json()}"
         )
 
+    def _batch_prompt(self, contexts: list[MarketContextInput]) -> str:
+        payload = [json.loads(context.model_dump_json()) for context in contexts]
+        return (
+            "You are a market context/event encoder. Do not output price targets, p50/p90 prices, "
+            "or future return paths. Return only a valid JSON array with exactly one output object "
+            "for each MarketContextInput, in the same order. Each output object must have keys: "
+            "events, overall_bias, impact_score, uncertainty, event_embedding, explanation, warnings. "
+            "Each event must include event_type, affected_assets, directional_bias, impact_strength, "
+            "uncertainty, time_decay, summary, risk_factors. Use lowercase directional_bias values and "
+            "numeric 0.0-1.0 floats for impact_strength, uncertainty, time_decay, and impact_score.\n\n"
+            f"MarketContextInput JSON array:\n{json.dumps(payload, ensure_ascii=False)}"
+        )
+
     def encode_events(self, context: MarketContextInput) -> LLMContextOutput:
         if not self.enabled or not self.api_key:
             fallback = LocalEventContextEncoder(self.fallback_provider).encode_events(context)
@@ -409,6 +501,52 @@ class GoogleGenerativeLLMEventEncoder(BaseLLMEventEncoder):
                 time.sleep(0.15)
         fallback = LocalEventContextEncoder(self.fallback_provider).encode_events(context)
         return fallback.model_copy(update={"warnings": [*fallback.warnings, f"External LLM fallback: {last_error}"]})
+
+    def encode_event_batch(self, contexts: list[MarketContextInput]) -> list[LLMContextOutput]:
+        if not contexts:
+            return []
+        if len(contexts) == 1:
+            return [self.encode_events(contexts[0])]
+        if not self.enabled or not self.api_key:
+            outputs = [LocalEventContextEncoder(self.fallback_provider).encode_events(context) for context in contexts]
+            reason = (
+                "External LLM API key missing; local_rules fallback used."
+                if self.enabled
+                else "External LLM disabled; local_rules fallback used."
+            )
+            return [output.model_copy(update={"warnings": [*output.warnings, reason]}) for output in outputs]
+
+        base_payload = {
+            "contents": [{"role": "user", "parts": [{"text": self._batch_prompt(contexts)}]}],
+        }
+        payloads = [
+            {
+                **base_payload,
+                "generationConfig": {
+                    "temperature": 0.0,
+                    "responseMimeType": "application/json",
+                },
+            },
+            {**base_payload, "generationConfig": {"temperature": 0.0}},
+        ]
+        last_error: Exception | None = None
+        for payload in payloads:
+            try:
+                request = urllib.request.Request(
+                    self._url(),
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                body = _read_json_request(request, timeout=self.timeout)
+                parts = body["candidates"][0]["content"]["parts"]
+                content = "".join(str(part.get("text", "")) for part in parts if not part.get("thought"))
+                return parse_llm_context_json_array(content, expected_count=len(contexts))
+            except (KeyError, RuntimeError, json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError, ValidationError, TypeError, ValueError) as exc:
+                last_error = exc
+                time.sleep(0.15)
+        outputs = [LocalEventContextEncoder(self.fallback_provider).encode_events(context) for context in contexts]
+        return [output.model_copy(update={"warnings": [*output.warnings, f"External LLM fallback: {last_error}"]}) for output in outputs]
 
 
 class LocalHTTPLLMEventEncoder(BaseLLMEventEncoder):
@@ -513,6 +651,24 @@ def parse_llm_context_json(raw: str) -> LLMContextOutput:
             explanation="Failed to parse LLM JSON output; using safe fallback context.",
             warnings=[f"Invalid LLM JSON fallback: {exc}"],
         )
+
+
+def parse_llm_context_json_array(raw: str, *, expected_count: int) -> list[LLMContextOutput]:
+    data: Any = json.loads(_extract_json_text(raw))
+    if isinstance(data, dict):
+        for key in ("outputs", "results", "items", "contexts"):
+            if isinstance(data.get(key), list):
+                data = data[key]
+                break
+    if not isinstance(data, list):
+        raise TypeError("LLM batch output must be a JSON array")
+    if len(data) != expected_count:
+        raise ValueError(f"LLM batch output length {len(data)} != expected {expected_count}")
+    outputs: list[LLMContextOutput] = []
+    for item in data:
+        cleaned = _sanitize_llm_context_data(item)
+        outputs.append(validate_llm_context_output(LLMContextOutput.model_validate(cleaned), raw=cleaned))
+    return outputs
 
 
 def encoder_from_settings(settings: Settings) -> BaseLLMEventEncoder:
