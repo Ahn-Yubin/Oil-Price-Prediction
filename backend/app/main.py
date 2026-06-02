@@ -18,7 +18,7 @@ from market_ai.constants import (
 
 
 settings = get_settings()
-app = FastAPI(title="Universal Market Forecast Platform", version=settings.app_version)
+app = FastAPI(title="Oil Price Forecast Platform", version=settings.app_version)
 
 for router in [
     forecast.router,

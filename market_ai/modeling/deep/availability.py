@@ -46,12 +46,20 @@ class DeepArtifactAvailability:
 
 
 def deep_training_command(model_name: str, interval: str, horizon: int | None = None) -> str:
-    del horizon
+    resolved_horizon = int(horizon or 30)
     base = (
         "python scripts/train/train_deep_fusion_models.py "
-        f"--model {model_name} --interval {interval} --universe oil_core "
+        f"--model {model_name} --interval {interval} --horizon {resolved_horizon} --universe oil_core "
+        "--use-processed-data "
+        f"--market-panel data/processed/market_panel/{interval}/panel.csv "
+        "--oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv "
+        "--cot data/processed/oil_fundamentals/cftc_cot_weekly.csv "
+        "--macro-panel data/processed/macro_panel/fred_daily_wide.csv "
+        "--event-context data/processed/event_context/event_context_daily.csv "
         "--epochs 10 --batch-size 64 --force"
     )
+    if model_name == "oil_context_fusion":
+        return f"{base} --llm-context"
     if model_name == "llm_context_seq_moe":
         return f"{base} --llm-context --events-path data/external/events/sample_market_events.csv"
     return f"{base} --no-llm-context"

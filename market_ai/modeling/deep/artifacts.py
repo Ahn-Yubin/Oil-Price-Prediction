@@ -10,9 +10,11 @@ import torch
 from market_ai.config import PROJECT_DIR
 from market_ai.modeling.deep.lstm_tcn_fusion import DeepLstmTcnFusion
 from market_ai.modeling.deep.llm_seq_moe import LLMContextSeqMoE
+from market_ai.modeling.deep.oil_context_fusion import OilContextFusion
 
 
 DEEP_MODEL_CLASSES = {
+    "oil_context_fusion": OilContextFusion,
     "deep_lstm_tcn_fusion": DeepLstmTcnFusion,
     "llm_context_seq_moe": LLMContextSeqMoE,
 }
@@ -80,6 +82,8 @@ def write_deep_metadata(
         "event_context_enabled": metadata.get("event_context_enabled"),
         "events_path": metadata.get("events_path", []),
         "related_assets_enabled": metadata.get("related_assets_enabled"),
+        "expert_systems": metadata.get("expert_systems") or (metadata.get("deep_config") or {}).get("expert_names"),
+        "data_inputs": metadata.get("data_inputs") or (metadata.get("data_report") or {}).get("data_inputs", {}),
         "git_commit": metadata.get("git_commit"),
         "metrics": metadata.get("metrics", {}),
         "notes": metadata.get("notes"),

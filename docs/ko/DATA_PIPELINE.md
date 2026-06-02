@@ -12,7 +12,7 @@
 | EIA petroleum | `data/processed/oil_fundamentals/eia_weekly.csv` | EIA petroleum weekly bulk에서 추출한 재고/수급 계열 | 원유 fundamental feature |
 | CFTC COT | `data/processed/oil_fundamentals/cftc_cot_weekly.csv` | CFTC Commitment of Traders 포지셔닝 | managed money/commercial positioning feature |
 | Macro panel | `data/processed/macro_panel/fred_daily_wide.csv` | FRED macro rates/indices daily wide panel | macro/rates cross-asset feature |
-| Event context | `data/processed/event_context/event_context_daily.csv` | 뉴스/이벤트를 daily context vector로 변환한 데이터 | `llm_context_seq_moe` event/context input |
+| Event context | `data/processed/event_context/event_context_daily.csv` | 뉴스/이벤트를 daily context vector로 변환한 데이터 | `oil_context_fusion` event/context input |
 | Raw news | `data/raw/news/public_market_news.csv` | Yahoo Finance RSS, Google News RSS, GDELT 등 공개 뉴스 원문 | LLM context 생성 입력 |
 | Manifest | `data/manifests/data_inventory.json` | dataset별 rows, 기간, source, point-in-time safety 기록 | 데이터 감시와 재현성 |
 
@@ -20,7 +20,7 @@ EIA/CFTC는 weekly 데이터이므로 daily sample에는 보수적인 available 
 
 ## 현재 수집 종목 Universe
 
-현재 `research_core` universe는 18개 종목입니다.
+운영 학습 대상은 `oil_core` universe이며, `research_core`의 FX/metal/equity/volatility 종목은 보조 cross-asset feature로 활용할 수 있습니다.
 
 | 분류 | 종목 | 개수 | 용도 |
 | --- | --- | ---: | --- |
@@ -45,7 +45,7 @@ EIA/CFTC는 weekly 데이터이므로 daily sample에는 보수적인 available 
 
 충분성 판단:
 
-- 1d 가격/수급/포지셔닝 데이터는 h8/h45 실험을 시작하기에 충분합니다.
+- 1d 가격/수급/포지셔닝 데이터는 h30 운영 artifact와 7/14/30 표시 길이 실험을 시작하기에 충분합니다.
 - 30m/15m 데이터는 기간이 너무 짧아 deep model 일반화 평가에는 부족합니다.
 - 뉴스는 340건에서 2,240건으로 늘었지만 기간이 2026년 1월 이후라 장기 regime 학습에는 여전히 부족합니다.
 - `event_context_daily`는 아직 2,240건 뉴스 전체를 반영하지 못했습니다. LLM API 일일 500회 한도 때문에 cache/resume 방식으로 여러 날에 나눠 처리해야 합니다.
@@ -55,7 +55,7 @@ EIA/CFTC는 weekly 데이터이므로 daily sample에는 보수적인 available 
 | 부족 데이터 | 영향 | 해결 방식 |
 | --- | --- | --- |
 | CME futures curve/settlement 장기 데이터 | term structure, roll yield, curve slope feature 부족 | CME DataMine/정산가 CSV를 확보해 `fetch_cme_settlements.py --manual-csv`로 적재 |
-| 더 긴 뉴스 history | `llm_context_seq_moe`가 장기 regime별 뉴스 반응을 충분히 학습하기 어려움 | GDELT rate limit을 피해 기간을 나눠 재수집하거나 licensed news CSV를 `NEWS_EVENTS_PATH`로 추가 |
+| 더 긴 뉴스 history | `oil_context_fusion`이 장기 regime별 뉴스 반응을 충분히 학습하기 어려움 | GDELT rate limit을 피해 기간을 나눠 재수집하거나 licensed news CSV를 `NEWS_EVENTS_PATH`로 추가 |
 | 실측 calibration residual | quantile band를 검증된 confidence interval로 부를 수 없음 | rolling backtest 후 `scripts/evaluate/calibrate_quantiles.py` 실행 |
 | Intraday fundamental/event alignment | 1h 이하 interval에서 주간/일간 feature의 release timing 정밀도 부족 | `feature_available_at`을 실제 발표 시각 기준으로 보강 |
 | Vendor-grade market data | yfinance 결측/수정/지연 가능성 | Stooq, broker/vendor CSV, database provider를 추가 source로 저장 |
@@ -88,10 +88,10 @@ Provider는 raw cache와 processed output을 분리합니다. 실패하면 statu
 ## Market Panel 생성
 
 ```bash
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1d --period 10y
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1h --period 730d
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 30m --period 60d
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 15m --period 60d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 1h --period 730d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 30m --period 60d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 15m --period 60d
 ```
 
 출력은 `data/processed/market_panel/{interval}/panel.parquet`를 우선 사용하고, parquet engine이 없으면 `panel.csv`로 저장됩니다. 현재 학습 명령은 CSV fallback을 읽을 수 있습니다.
@@ -164,7 +164,7 @@ LLM API 한도가 있는 경우 `llm_context_cache.jsonl`에 처리 결과가 �
 
 ```bash
 .venv/bin/python scripts/data/build_real_dataset.py \
-  --universe research_core \
+  --universe oil_core \
   --interval 1d \
   --period 10y \
   --news-timespan 3m \

@@ -14,14 +14,17 @@ from market_ai.data.event_providers import FileEventProvider
 from market_ai.data.storage import read_table
 from market_ai.modeling.deep.availability import deep_artifact_availability
 from market_ai.modeling.deep.inference import predict_deep_quantiles
+from market_ai.modeling.registry import metadata_for_artifact
 
 
 DEEP_COLORS = {
+    "oil_context_fusion": "#2dd4bf",
     "deep_lstm_tcn_fusion": "#2dd4bf",
     "llm_context_seq_moe": "#f2cc60",
 }
 
 DEEP_LABELS = {
+    "oil_context_fusion": "Oil Context Fusion",
     "deep_lstm_tcn_fusion": "Deep LSTM+TCN Fusion",
     "llm_context_seq_moe": "LLM Context Seq MoE",
 }
@@ -86,11 +89,13 @@ def _load_processed_market_panel(data_dir: str, interval: str) -> pd.DataFrame |
 @lru_cache(maxsize=4)
 def _load_processed_auxiliary(data_dir: str) -> pd.DataFrame | None:
     root = Path(data_dir) / "processed" / "oil_fundamentals"
+    macro_root = Path(data_dir) / "processed" / "macro_panel"
     try:
         return combine_auxiliary_feature_frames(
             oil_fundamentals=read_table(root / "eia_weekly.csv") if (root / "eia_weekly.csv").exists() else None,
             cot=read_table(root / "cftc_cot_weekly.csv") if (root / "cftc_cot_weekly.csv").exists() else None,
             cme_curve=read_table(root / "cme_curve_daily.csv") if (root / "cme_curve_daily.csv").exists() else None,
+            macro=read_table(macro_root / "fred_daily_wide.csv") if (macro_root / "fred_daily_wide.csv").exists() else None,
         )
     except Exception:
         return None
@@ -105,6 +110,7 @@ def forecast_with_deep_model(
     settings: Settings | None = None,
     symbol: str = "UNKNOWN",
     candles: pd.DataFrame | None = None,
+    event_context_frame: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     model_horizon = int(horizon or INTERVAL_TO_HORIZON.get(interval, 45))
@@ -114,8 +120,16 @@ def forecast_with_deep_model(
         raise
     except Exception as exc:
         raise DeepModelUnavailable(str(exc)) from exc
+    metadata = metadata_for_artifact(artifact_path, metadata_dir=Path(settings.metadata_dir))
     frame = candles if candles is not None else _frame_from_close(close)
-    event_context_frame = _load_processed_event_context(str(settings.data_dir)) if settings.enable_llm_context else None
+    use_event_context = bool(metadata.event_context_enabled)
+    resolved_event_context_frame = (
+        event_context_frame
+        if event_context_frame is not None
+        else _load_processed_event_context(str(settings.data_dir))
+        if use_event_context
+        else None
+    )
     market_panel = _load_processed_market_panel(str(settings.data_dir), interval)
     auxiliary_frame = _load_processed_auxiliary(str(settings.data_dir))
     try:
@@ -125,8 +139,8 @@ def forecast_with_deep_model(
             symbol=symbol,
             interval=interval,
             horizon=model_horizon,
-            event_provider=FileEventProvider.from_env() if settings.enable_llm_context else None,
-            event_context_frame=event_context_frame,
+            event_provider=FileEventProvider.from_env() if use_event_context else None,
+            event_context_frame=resolved_event_context_frame,
             auxiliary_frame=auxiliary_frame,
             market_panel=market_panel,
             device="cpu",
@@ -146,4 +160,5 @@ def forecast_with_deep_model(
         "confidence": np.asarray(prediction["confidence"], dtype=np.float64),
         "metadata": prediction["metadata"],
         "artifact_file": artifact_path.name,
+        "event_context_source": "live_or_override" if event_context_frame is not None else "processed_or_file",
     }

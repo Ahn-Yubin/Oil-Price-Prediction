@@ -15,11 +15,11 @@ def test_api_forecast_deep_model_request_gracefully_falls_back(monkeypatch):
         lambda **kwargs: (_ for _ in ()).throw(DeepModelUnavailable("missing test artifact")),
     )
     client = TestClient(main.app)
-    response = client.get("/api/forecast?symbol=CL=F&interval=1d&models=deep_lstm_tcn_fusion")
+    response = client.get("/api/forecast?symbol=CL=F&interval=1d&models=oil_context_fusion")
     assert response.status_code == 200
     body = response.json()
-    assert "deep_lstm_tcn_fusion" in body["selected_models"]
-    assert body["artifact_status"]["deep_lstm_tcn_fusion"] == "artifact_missing"
+    assert "oil_context_fusion" in body["selected_models"]
+    assert body["artifact_status"]["oil_context_fusion"] == "artifact_missing"
     assert any(item["code"] == "deep_artifact_unavailable" for item in body["warning_objects"])
     assert body["forecast"]
 

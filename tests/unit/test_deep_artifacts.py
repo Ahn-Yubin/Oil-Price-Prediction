@@ -4,6 +4,7 @@ import torch
 
 from market_ai.modeling.deep.artifacts import load_deep_artifact, save_deep_artifact, write_deep_metadata
 from market_ai.modeling.deep.lstm_tcn_fusion import DeepLstmTcnFusion
+from market_ai.modeling.deep.oil_context_fusion import OilContextFusion
 
 
 def test_deep_artifact_save_load_roundtrip(tmp_path: Path):
@@ -22,6 +23,25 @@ def test_deep_artifact_save_load_roundtrip(tmp_path: Path):
     out = loaded(torch.randn(1, 16, 5), torch.randn(1, 16, 2), torch.zeros(1, 13), torch.zeros(1, 4))
     assert out["quantiles"].shape == (1, 3, 7)
     assert loaded_meta["horizon"] == 3
+
+
+def test_oil_context_fusion_artifact_load_accepts_expert_names(tmp_path: Path):
+    model = OilContextFusion(price_feature_dim=5, cross_asset_dim=2, event_context_dim=13, static_dim=4, horizon=3)
+    artifact = tmp_path / "oil_context_fusion_1d_h3.pt"
+    metadata = {
+        "lookback": 16,
+        "horizon": 3,
+        "interval": "1d",
+        "feature_set": "test",
+        "deep_config": model.config_dict(),
+    }
+    save_deep_artifact(model, artifact, model_name="oil_context_fusion", metadata=metadata)
+    loaded, loaded_meta = load_deep_artifact(artifact)
+    out = loaded(torch.randn(1, 16, 5), torch.randn(1, 16, 2), torch.zeros(1, 13), torch.zeros(1, 4))
+    assert out["quantiles"].shape == (1, 3, 7)
+    assert out["expert_weights"].shape == (1, 6)
+    assert out["expert_names"] == ("lstm", "tcn", "attention", "context", "pattern", "motif")
+    assert loaded_meta["deep_config"]["expert_names"] == ["lstm", "tcn", "attention", "context", "pattern", "motif"]
 
 
 def test_deep_metadata_writes_operational_fields(tmp_path: Path):

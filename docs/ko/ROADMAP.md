@@ -1,12 +1,12 @@
 # 로드맵
 
-이 프로젝트는 유가 예측 use case에서 시작해 범용 시장 AI 플랫폼으로 확장합니다. 현재 우선순위는 “데이터 신뢰도 -> LLM context 안정화 -> 재학습 -> backtest/calibration -> frontend 운영성” 순서입니다.
+이 프로젝트는 WTI 유가 예측 전용 모델과 dashboard를 안정화합니다. 현재 우선순위는 “데이터 신뢰도 -> LLM context 안정화 -> 단일 모델 재학습 -> backtest/calibration -> frontend 운영성” 순서입니다.
 
 ## 즉시 우선순위
 
 1. Google Gemma/Gemini LLM 연결을 live로 검증합니다.
 2. `data/raw/news/public_market_news.csv`를 기반으로 live LLM event context를 재생성합니다.
-3. `llm_context_seq_moe`와 `deep_lstm_tcn_fusion`을 h8/h45로 재학습합니다.
+3. `oil_context_fusion`을 1D/1H h30으로 재학습하고 7/14/30 표시 길이를 검증합니다.
 4. CME settlement/curve CSV를 확보해 `cme_curve_daily.csv`를 생성합니다.
 5. Rolling backtest와 quantile calibration을 실행합니다.
 6. `/api/market-context`와 frontend marker/panel을 실제 차트에서 검증합니다.
@@ -21,8 +21,8 @@
 
 ## 모델 확장
 
-- `research_core`에서 원유/에너지 중심 모델을 안정화합니다.
-- 이후 ETF, FX, metals, indices, rates, crypto로 universe를 확장합니다.
+- `oil_core`에서 원유/에너지 중심 모델을 안정화합니다.
+- ETF, FX, metals, indices, rates, crypto는 독립 예측 대상이 아니라 유가 보조 feature로 유지합니다.
 - LLM은 context encoder로만 유지하고, 숫자 예측은 time-series model이 담당합니다.
 - Coverage가 측정된 뒤에만 calibrated interval 표현을 사용합니다.
 

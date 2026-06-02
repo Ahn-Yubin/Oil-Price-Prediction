@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+from market_ai.constants import INTERVAL_TO_DELTA
 from market_ai.data.deep_dataset import build_deep_dataset_from_frame
 from market_ai.data.event_providers import FileEventProvider, NullEventProvider
 from market_ai.modeling.deep.artifacts import load_deep_artifact
@@ -39,10 +40,24 @@ def predict_deep_quantiles(
         validation_ratio=0.0,
         test_ratio=0.0,
     )
+    source_candles = candles.copy()
+    normalized_dates = pd.to_datetime(source_candles["date"], errors="coerce", utc=True)
+    source_candles = source_candles.assign(date=normalized_dates).dropna(subset=["date"]).sort_values("date")
+    if not source_candles.empty:
+        last = source_candles.iloc[-1].copy()
+        step = INTERVAL_TO_DELTA.get(interval)
+        if step is not None:
+            synthetic_rows = []
+            for idx in range(horizon):
+                row = last.copy()
+                row["date"] = pd.Timestamp(last["date"]) + step * (idx + 1)
+                synthetic_rows.append(row)
+            source_candles = pd.concat([source_candles, pd.DataFrame(synthetic_rows)], ignore_index=True)
+
     dataset = build_deep_dataset_from_frame(
         symbol=symbol,
         interval=interval,
-        candles=candles,
+        candles=source_candles,
         config=config,
         event_provider=event_provider or NullEventProvider(),
         auxiliary_frame=auxiliary_frame,
@@ -79,5 +94,9 @@ def predict_deep_quantiles(
         "prob_up": out["prob_up"].detach().cpu().numpy()[0],
         "expected_volatility": out["expected_volatility"].detach().cpu().numpy()[0] * recent_vol,
         "confidence": out["confidence"].detach().cpu().numpy()[0],
-        "extra": {key: value.detach().cpu().numpy()[0] for key, value in out.items() if key not in {"quantiles", "prob_up", "expected_volatility", "confidence"}},
+        "extra": {
+            key: value.detach().cpu().numpy()[0]
+            for key, value in out.items()
+            if key not in {"quantiles", "prob_up", "expected_volatility", "confidence"} and torch.is_tensor(value)
+        },
     }

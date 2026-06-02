@@ -3,157 +3,155 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Universal Market Forecast Dashboard</title>
-    <link rel="stylesheet" href="/static/dashboard.css" />
+    <title>Oil Price Forecast Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css?v=20260602-oil-h30" />
   </head>
   <body>
     <main class="wrap">
       <section class="header">
-        <h1>Universal Market Forecast Dashboard</h1>
-        <p>TradingView Lightweight Charts로 실제 시장 데이터와 확률적 예측 경로를 시각화</p>
+        <h1 data-i18n="appTitle">유가 예측 대시보드</h1>
+        <label class="language-toggle" aria-label="Language">
+          <span>KO</span>
+          <input id="language-toggle" type="checkbox" role="switch" aria-label="Language" />
+          <span class="language-slider" aria-hidden="true"></span>
+          <span>EN</span>
+        </label>
       </section>
 
       <section class="controls">
-        <label for="symbol-input">Symbol</label>
-        <div class="symbol-combobox" id="symbol-combobox">
-          <div class="search-shell">
-            <span class="search-icon">⌕</span>
-            <input
-              id="symbol-input"
-              value="NYMEX:CL1!"
-              placeholder="or"
-              autocomplete="off"
-              spellcheck="false"
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded="false"
-              aria-controls="symbol-dropdown"
-            />
-          </div>
-          <div id="symbol-dropdown" class="symbol-dropdown hidden" role="listbox">
-            <button class="symbol-option active" type="button" data-symbol="NYMEX:CL1!">NYMEX:CL1!</button>
-            <button class="symbol-option" type="button" data-symbol="ICEEUR:BRN1!">ICEEUR:BRN1!</button>
-            <button class="symbol-option" type="button" data-symbol="TVC:USOIL">TVC:USOIL</button>
-            <button class="symbol-option" type="button" data-symbol="TVC:UKOIL">TVC:UKOIL</button>
-            <button class="symbol-option" type="button" data-symbol="TVC:DXY">TVC:DXY</button>
-            <button class="symbol-option" type="button" data-symbol="FX_IDC:USDKRW">FX_IDC:USDKRW</button>
-            <button class="symbol-option" type="button" data-symbol="OANDA:XAUUSD">OANDA:XAUUSD</button>
-          </div>
+        <input id="symbol-input" type="hidden" value="CL=F" />
+        <div class="fixed-symbol" aria-label="Fixed forecast symbol">
+          <span data-i18n="oilInstrument">WTI 원유</span>
+          <strong>CL=F</strong>
         </div>
-        <label for="interval-input">Interval</label>
+        <label for="interval-input" data-i18n="interval">주기</label>
         <select id="interval-input">
           <option value="1d" selected>1D</option>
           <option value="1h">1H</option>
-          <option value="30m">30M</option>
-          <option value="15m">15M</option>
         </select>
-        <label for="model-input">Model</label>
-        <select id="model-input">
-          <option value="" selected>Default</option>
-          <option value="deep_lstm_tcn_fusion">Deep LSTM+TCN</option>
-          <option value="llm_context_seq_moe">LLM Context MoE</option>
-          <option value="motif">Motif</option>
-          <option value="pattern_mlp">Pattern MLP</option>
-          <option value="random_walk">Random Walk</option>
-          <option value="drift">Drift</option>
-          <option value="seasonal_naive">Seasonal Naive</option>
-          <option value="volatility_scaled_naive">Vol-Scaled Naive</option>
+        <label for="horizon-input" data-i18n="horizon">예측 길이</label>
+        <select id="horizon-input">
+          <option value="7" selected>7</option>
+          <option value="14">14</option>
+          <option value="30">30</option>
         </select>
-        <label for="scenario-input">Scenario</label>
-        <select id="scenario-input">
-          <option value="base" selected>Base</option>
-          <option value="bull">Bull</option>
-          <option value="bear">Bear</option>
-        </select>
-        <label class="toggle-label" for="advanced-toggle">
-          <input id="advanced-toggle" type="checkbox" />
-          Advanced
-        </label>
-        <button id="load-button" type="button">Refresh</button>
       </section>
       <section id="status-banner" class="status-banner hidden"></section>
       <section id="info-banner" class="info-banner hidden"></section>
-
-      <section class="metrics">
-        <article class="metric-card">
-          <h3>MAE</h3>
-          <p id="mae-value">-</p>
-        </article>
-        <article class="metric-card">
-          <h3>RMSE</h3>
-          <p id="rmse-value">-</p>
-        </article>
-        <article class="metric-card">
-          <h3>MAPE</h3>
-          <p id="mape-value">-</p>
-        </article>
-        <article class="metric-card">
-          <h3>Model</h3>
-          <p id="model-value">-</p>
-        </article>
+      <section id="loading-banner" class="loading-banner hidden" aria-live="polite">
+        <span class="loading-dot"></span>
+        <span id="loading-message">로딩 중</span>
       </section>
 
-      <section class="chart-panel">
-        <div class="chart-panel-head">
-          <h3>TradingView-Style Live Chart + AI Forecast</h3>
-          <div class="chart-meta">
-            <span id="data-status-badge" class="data-status-badge">DATA -</span>
-            <span id="calibration-badge" class="data-status-badge">BAND -</span>
-            <span id="confidence-badge" class="data-status-badge">CONF -</span>
-            <span id="regime-badge" class="data-status-badge">REGIME -</span>
-            <p id="chart-updated-value">Updated -</p>
-          </div>
-        </div>
-        <div id="model-overlay-legend" class="model-overlay-legend"></div>
-        <div class="chart-wrap">
-          <div id="tv-legend" class="tv-legend"></div>
-          <div id="oilChart"></div>
-        </div>
-      </section>
+      <div class="dashboard-grid">
+        <div class="main-column">
+          <section class="chart-panel">
+            <div class="chart-panel-head">
+              <div class="chart-mode-control">
+                <label class="language-toggle chart-mode-toggle" aria-label="Chart mode">
+                  <span data-i18n="backtest">백테스트</span>
+                  <input id="backtest-mode-toggle" type="checkbox" role="switch" aria-label="Chart mode" checked />
+                  <span class="language-slider" aria-hidden="true"></span>
+                  <span data-i18n="live">라이브</span>
+                </label>
+                <span id="backtest-status" data-severity="info"></span>
+              </div>
+              <div class="chart-meta">
+                <span id="data-status-badge" class="data-status-badge">데이터 -</span>
+                <span id="calibration-badge" class="data-status-badge">밴드 -</span>
+                <span id="confidence-badge" class="data-status-badge">신뢰도 -</span>
+                <span id="regime-badge" class="data-status-badge">국면 -</span>
+                <p id="chart-updated-value">업데이트 -</p>
+              </div>
+            </div>
+            <div class="chart-wrap">
+              <div id="tv-legend" class="tv-legend"></div>
+              <div id="oilChart"></div>
+              <div id="chart-data-warning" class="chart-data-warning hidden"></div>
+              <div id="chart-loading-overlay" class="chart-loading-overlay hidden">
+                <span class="loading-dot"></span>
+                <span id="chart-loading-message">차트 데이터 불러오는 중</span>
+              </div>
+              <div id="chart-news-markers" class="chart-news-markers" aria-label="Chart news events"></div>
+              <div id="news-detail-popover" class="news-detail-popover hidden" role="dialog" aria-live="polite"></div>
+            </div>
+            <div id="news-timeline" class="news-timeline" aria-label="News event timeline"></div>
+            <div class="chart-bottom-panel">
+              <div class="backtest-toolbar" aria-label="Backtest controls">
+                <div class="origin-card">
+                  <span data-i18n="origin">기준 시점</span>
+                  <strong id="backtest-origin-value">-</strong>
+                </div>
+              </div>
+              <section class="metrics">
+                <article class="metric-card">
+                  <h3>MAE</h3>
+                  <p id="mae-value">검증 대기</p>
+                </article>
+                <article class="metric-card">
+                  <h3>RMSE</h3>
+                  <p id="rmse-value">검증 대기</p>
+                </article>
+                <article class="metric-card">
+                  <h3>MAPE</h3>
+                  <p id="mape-value">검증 대기</p>
+                </article>
+              </section>
+            </div>
+          </section>
 
-      <section id="explanation-panel" class="explanation-panel">
-        <div class="explanation-head">
-          <h3>Why this forecast?</h3>
-          <span>Context encoder</span>
+          <section id="llm-chat-panel" class="llm-chat-panel">
+            <div class="explanation-head">
+              <h3 data-i18n="chatTitle">AI 시황 질문</h3>
+              <span data-i18n="chatScope">현재 종목/뉴스/모델 기준</span>
+            </div>
+            <div id="llm-chat-log" class="llm-chat-log">
+              <p data-i18n="chatEmpty">예측 결과나 시황에 대해 짧게 질문해보세요.</p>
+            </div>
+            <form id="llm-chat-form" class="llm-chat-form">
+              <input id="llm-chat-input" type="text" data-i18n-placeholder="chatPlaceholder" placeholder="예: 지금 상승 예측의 핵심 근거가 뭐야?" autocomplete="off" />
+              <button id="llm-chat-submit" type="button" data-i18n="chatAsk">질문</button>
+            </form>
+          </section>
         </div>
-        <p id="explanation-summary">-</p>
-        <ul id="explanation-drivers"></ul>
-        <p id="explanation-warning" class="explanation-warning"></p>
-      </section>
 
-      <section id="market-context-panel" class="context-panel">
-        <div class="explanation-head">
-          <h3>News & Scenario Context</h3>
-          <span id="context-mode">-</span>
-        </div>
-        <p id="scenario-summary">-</p>
-        <div class="scenario-grid">
-          <div>
-            <span>Bull</span>
-            <p id="scenario-bull">-</p>
-          </div>
-          <div>
-            <span>Base</span>
-            <p id="scenario-base">-</p>
-          </div>
-          <div>
-            <span>Bear</span>
-            <p id="scenario-bear">-</p>
-          </div>
-        </div>
-        <div id="context-events" class="context-events"></div>
-      </section>
+        <aside class="side-column">
+          <section id="model-commentary-panel" class="model-commentary-panel">
+            <div class="explanation-head">
+              <h3 data-i18n="llmCommentary">AI 시황 해설</h3>
+              <span id="commentary-status">-</span>
+            </div>
+            <p id="commentary-summary">-</p>
+            <ul id="commentary-risks" class="commentary-risks"></ul>
+          </section>
 
-      <section id="model-diagnostics-panel" class="diagnostics-panel">
-        <div class="explanation-head">
-          <h3>Model Diagnostics</h3>
-          <span id="diagnostics-status">-</span>
-        </div>
-        <div id="leaderboard-table" class="leaderboard-table"></div>
-      </section>
+          <section id="market-context-panel" class="context-panel">
+            <div class="explanation-head">
+              <h3 data-i18n="newsContext">뉴스와 시나리오</h3>
+              <span id="context-mode">-</span>
+            </div>
+            <p id="scenario-summary">-</p>
+            <div class="scenario-grid">
+              <div>
+                <span data-i18n="bull">상방</span>
+                <p id="scenario-bull">-</p>
+              </div>
+              <div>
+                <span data-i18n="base">기준</span>
+                <p id="scenario-base">-</p>
+              </div>
+              <div>
+                <span data-i18n="bear">하방</span>
+                <p id="scenario-bear">-</p>
+              </div>
+            </div>
+            <div id="context-events" class="context-events"></div>
+          </section>
+        </aside>
+      </div>
     </main>
 
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="/static/main.js"></script>
+    <script src="/static/main.js?v=20260602-oil-h30"></script>
   </body>
 </html>

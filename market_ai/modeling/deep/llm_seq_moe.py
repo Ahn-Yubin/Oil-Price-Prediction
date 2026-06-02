@@ -36,10 +36,9 @@ class LLMContextSeqMoE(nn.Module):
         q_dim = self.horizon * len(QUANTILE_LEVELS)
         self.lstm_head = MLP(hidden_dim, hidden_dim, q_dim, dropout=dropout)
         self.tcn_head = MLP(hidden_dim, hidden_dim, q_dim, dropout=dropout)
-        self.baseline_adapter = MLP(self.static_dim, hidden_dim, q_dim, dropout=dropout)
-        self.motif_adapter = MLP(self.static_dim, hidden_dim, q_dim, dropout=dropout)
         gate_dim = self.event_context_dim + self.static_dim + hidden_dim * 2
-        self.gating_network = MLP(gate_dim, hidden_dim, 4, dropout=dropout)
+        self.context_head = MLP(gate_dim, hidden_dim, q_dim, dropout=dropout)
+        self.gating_network = MLP(gate_dim, hidden_dim, 3, dropout=dropout)
         self.direction_head = MLP(hidden_dim * 2 + self.static_dim, hidden_dim, self.horizon, dropout=dropout)
         self.volatility_head = MLP(hidden_dim * 2 + self.static_dim, hidden_dim, self.horizon, dropout=dropout)
         self.confidence_head = MLP(self.event_context_dim + self.static_dim, hidden_dim, 1, dropout=dropout)
@@ -79,16 +78,15 @@ class LLMContextSeqMoE(nn.Module):
         lstm_repr = lstm_seq[:, -1, :]
         tcn_repr = self.tcn(seq)
         q_dim = len(QUANTILE_LEVELS)
+        gate_input = torch.cat([x_event_context, x_static, lstm_repr, tcn_repr], dim=-1)
         experts = torch.stack(
             [
                 self.lstm_head(lstm_repr).view(batch, self.horizon, q_dim),
                 self.tcn_head(tcn_repr).view(batch, self.horizon, q_dim),
-                self.baseline_adapter(x_static).view(batch, self.horizon, q_dim),
-                self.motif_adapter(x_static).view(batch, self.horizon, q_dim),
+                self.context_head(gate_input).view(batch, self.horizon, q_dim),
             ],
             dim=1,
         )
-        gate_input = torch.cat([x_event_context, x_static, lstm_repr, tcn_repr], dim=-1)
         expert_weights = torch.softmax(self.gating_network(gate_input), dim=-1)
         quantiles = torch.sum(experts * expert_weights[:, :, None, None], dim=1)
         quantiles = enforce_quantile_monotonicity(quantiles)

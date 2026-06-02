@@ -1,255 +1,169 @@
 # Model Design
 
-Numeric forecasts are handled by time-series models and baselines. The LLM is a context/event encoder and explanation generator, not a direct price forecaster.
+This document explains how the oil forecasting model reads market data, combines several expert views, and turns them into the final forecast path. Low-level implementation details are kept to the technical sections only.
 
-## Model Taxonomy
+The LLM does not directly forecast prices. It reads news/events, summarizes market context, and writes analyst-style explanations. Numeric forecasts are produced by the single operational oil model, `oil_context_fusion`.
 
-| Class | Models |
-| --- | --- |
-| Classical | `motif` |
-| Deep learning | `pattern_mlp`, `deep_lstm_tcn_fusion`, `llm_context_seq_moe` |
-| Baseline | `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive` |
-| Backtest-only | `flat`, `simple_moving_average_path`, optional `regime_ensemble` |
-| Removed/deprecated | `cycle`, `lstm`, `tcn`, `ensemble` |
+## One-Line Summary
 
-## Forecast Target
+`oil_context_fusion` combines crude price action, related energy markets, rates/FX/equity context, oil inventories/positioning, and news tone. It blends several internal expert views, then produces the forecast path and forecast range.
 
-The forecast target is a volatility-scaled cumulative log return distribution. Raw future price is not used directly as the training target.
-
-```text
-scaled_target_h = cumulative_log_return_h / recent_realized_volatility
-price_t+h = current_price * exp(predicted_cumulative_log_return_h)
-```
-
-This structure allows the same model/feature design to extend across assets with different price levels.
-
-## Input Features
-
-| Input | Contents |
-| --- | --- |
-| `x_price` | log returns, vol-scaled returns, range, rolling volatility, momentum, drawdown, autocorrelation, trend, skew/kurtosis, cycle features |
-| `x_cross_asset` | related returns, correlation, spread, relative strength, risk proxy, missing indicators |
-| `x_event_context` | event/context vectors from local_rules or LLM encoders |
-| `x_static` | current price, realized volatility, lookback, horizon |
-
-EIA/CFTC/CME/event context values enter samples only when `feature_available_at <= as_of_time`.
-
-## Input And Output Tensor Structure
-
-For the current `1d`, `horizon=8`, `lookback=128` artifacts, the deep model tensors are:
-
-| Tensor | Shape | Meaning |
-| --- | --- | --- |
-| `x_price` | `[batch, 128, 23]` | Price, volatility, trend, and distribution features from each asset's OHLCV |
-| `x_cross_asset` | `[batch, 128, 6]` | Related asset returns/correlation plus EIA/CFTC/CME-derived proxies and missing indicators |
-| `x_event_context` | `[batch, 13]` | News/event context vector from the LLM or deterministic local rules |
-| `x_static` | `[batch, 4]` | Current price, recent realized volatility, lookback, and horizon |
-| `quantiles` | `[batch, 8, 7]` | 5/10/25/50/75/90/95% volatility-scaled cumulative log return |
-| `prob_up` | `[batch, 8]` | Up-direction probability by horizon step |
-| `expected_volatility` | `[batch, 8]` | Expected volatility by step |
-| `confidence` | `[batch, 1]` | Internal model confidence score |
-
-The forecast price path is reconstructed from scaled cumulative log returns:
-
-```text
-predicted_cumulative_log_return_h = predicted_scaled_return_h * recent_realized_volatility
-predicted_price_t+h = current_price * exp(predicted_cumulative_log_return_h)
-```
-
-The current training script instantiates artifacts with these architecture defaults:
-
-| Item | Current Value |
-| --- | --- |
-| `hidden_dim` | 48 |
-| `dropout` | 0.1 |
-| Quantile levels | 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95 |
-| LSTM | 1-layer, unidirectional `nn.LSTM(input_size=96, hidden_size=48, batch_first=True)` |
-| TCN | `Linear(96 -> 48)`, then dilation 1/2/4/8 causal residual blocks |
-| TCN block | `CausalConv1d(48 -> 48, kernel=3, dilation=d)` x 2, `GELU`, `Dropout(0.1)`, residual `LayerNorm(48)` |
-| Shared MLP | `Linear(input -> 48)`, `GELU`, `Dropout(0.1)`, `Linear(48 -> output)` |
-
-## Full Deep Forecast Flow
+## Data Flow
 
 ```mermaid
 flowchart LR
-    A["OHLCV candles"] --> B["x_price\n[batch, lookback, 23]"]
-    C["Market panel + EIA/CFTC/CME"] --> D["x_cross_asset\n[batch, lookback, 6]"]
-    E["News/Event files"] --> F["LLM/local event encoder"]
-    F --> G["x_event_context\n[batch, 13]"]
-    H["Current price / volatility / config"] --> I["x_static\n[batch, 4]"]
-    B --> J["Deep model"]
-    D --> J
-    G --> J
+    A["WTI crude price data"] --> E["Unified oil forecasting model"]
+    B["Brent, gas, gasoline, heating oil"] --> E
+    C["Rates, FX, Nasdaq/equities, volatility"] --> E
+    D["EIA inventories, CFTC positioning, news/events"] --> E
+    E --> F["Expert views"]
+    F --> G["Adaptive weighting"]
+    G --> H["Median forecast path"]
+    G --> I["Upper/lower forecast range"]
+    H --> J["Chart and AI market commentary"]
     I --> J
-    J --> K["Quantile scaled return path\n[batch, horizon, 7]"]
-    J --> L["prob_up / expected_volatility / confidence"]
-    K --> M["Price reconstruction\nprice_t+h = price_t * exp(return_h)"]
 ```
 
-## DeepLstmTcnFusion
+Every input must be point-in-time safe. EIA, CFTC, macro, and news/event values enter a sample only after they would have been available in real time.
 
-`deep_lstm_tcn_fusion` projects price features and optional cross-asset features, then runs causal LSTM and causal TCN encoders in parallel. The fusion gate mixes both encoders using LSTM/TCN representations, event context, and static features.
+## Internal Experts
 
-```mermaid
-flowchart TB
-    XP["x_price [B,L,23]"] --> PP["Linear price_projection\n23 -> hidden"]
-    XC["x_cross_asset [B,L,6]"] --> CP["Linear cross_projection\n6 -> hidden"]
-    PP --> CAT["Concat sequence\n[B,L,hidden*2]"]
-    CP --> CAT
-    CAT --> LSTM["LSTM encoder\nlast hidden [B,hidden]"]
-    CAT --> TCN["Causal TCN encoder\n[B,hidden]"]
-    XE["x_event_context [B,13]"] --> CTX["Context concat\n[event_context + static]"]
-    XS["x_static [B,4]"] --> CTX
-    LSTM --> GATE["Fusion gate MLP\nsigmoid"]
-    TCN --> GATE
-    CTX --> GATE
-    LSTM --> FUSE["gate * LSTM + (1-gate) * TCN"]
-    TCN --> FUSE
-    CTX --> FILM["FiLM linear\ngamma,beta"]
-    FILM --> FUSE
-    FUSE --> Q["Quantile MLP\n[B,H,7]"]
-    FUSE --> P["Direction MLP\nprob_up [B,H]"]
-    FUSE --> V["Volatility MLP\nexpected_volatility [B,H]"]
-    FUSE --> C["Confidence MLP\n[B,1]"]
-```
+The dashboard shows one model line, but the model internally blends six expert views.
 
-Outputs:
+| Expert | Plain-English Role | Main Inputs |
+| --- | --- | --- |
+| Long-flow expert | Remembers ordered price history and longer context such as a rally followed by consolidation. | Longer price sequences |
+| Shock/short-pattern expert | Captures recent jumps, pullbacks, and volatility shocks. | Short-term price changes |
+| Important-window expert | Focuses more on the past windows that matter most for the current setup. | Key bars and turning points |
+| News/macro context expert | Interprets news, events, inventories, rates, FX, and risk appetite together with price action. | News, macro, supply data |
+| Pattern expert | Summarizes the current chart shape: trend, range position, momentum, and volatility. | Chart shape and trend |
+| Motif expert | Searches for historical windows that resembled the recent market setup and uses them as analog hints. | Similar historical windows |
 
-- volatility-scaled cumulative log return quantiles
-- `prob_up`
-- expected volatility
-- confidence
+## Pattern And Motif Experts
 
-Layer structure:
+The pattern expert reads the current chart shape. It helps the model understand whether crude is pulling back from the upper range, rebounding from the lower range, consolidating inside an uptrend, or moving sideways without a clear breakout.
 
-| Stage | Structure |
-| --- | --- |
-| Projection | `x_price: 23 -> 48`, `x_cross_asset: 6 -> 48` |
-| Sequence concat | `[B,128,48] + [B,128,48] -> [B,128,96]` |
-| LSTM encoder | `[B,128,96] -> last hidden [B,48]` |
-| TCN encoder | `[B,128,96] -> [B,48]`, dilation 1/2/4/8 causal residual stack |
-| Context conditioning | `x_event_context [B,13] + x_static [B,4] -> context [B,17]` |
-| Fusion gate | `MLP(48 + 48 + 17 -> 48)`, sigmoid, then `gate * LSTM + (1-gate) * TCN` |
-| FiLM | `Linear(17 -> 96)` split into `gamma [B,48]` and `beta [B,48]` to modulate the fused representation |
-| Heads | Quantile `MLP(48 -> 56)` reshaped to `[B,8,7]`, direction `MLP(48 -> 8)`, volatility `MLP(48 -> 8)`, confidence `MLP(48+17 -> 1)` |
+The motif expert looks for past periods that behaved like the recent market. It does not copy the past path directly; it uses similar historical windows as a statistical hint. This is useful in oil because inventory reports, geopolitical headlines, and OPEC comments can produce recurring market reactions.
 
-## LLMContextSeqMoE
+These are not separate user-facing models anymore. They are internal experts inside `oil_context_fusion`.
 
-`llm_context_seq_moe` is a learned mixture-of-experts with an LSTM expert, TCN expert, baseline adapter, and motif adapter.
+## How The Final Forecast Is Built
 
-```mermaid
-flowchart TB
-    XP["x_price"] --> PP["price_projection"]
-    XC["x_cross_asset"] --> CP["cross_projection"]
-    PP --> SEQ["Concat sequence"]
-    CP --> SEQ
-    SEQ --> LSTM["LSTM encoder"]
-    SEQ --> TCN["TCN encoder"]
-    LSTM --> E1["LSTM expert quantiles"]
-    TCN --> E2["TCN expert quantiles"]
-    XS["x_static"] --> E3["Baseline adapter quantiles"]
-    XS --> E4["Motif adapter quantiles"]
-    XE["x_event_context"] --> GATE["Gating MLP softmax\n4 expert weights"]
-    XS --> GATE
-    LSTM --> GATE
-    TCN --> GATE
-    E1 --> MIX["Weighted sum of expert quantiles"]
-    E2 --> MIX
-    E3 --> MIX
-    E4 --> MIX
-    GATE --> MIX
-    MIX --> Q["Monotonic quantiles [B,H,7]"]
-    LSTM --> AUX["Direction/volatility heads"]
-    TCN --> AUX
-    XE --> CONF["Confidence head\nuncertainty-adjusted"]
-```
+1. Price and related-market data are converted into trend, volatility, relative strength, and shock signals.
+2. Inventories, positioning, rates, FX, equities, and news context are aligned point-in-time.
+3. Six experts form their own view of the future path.
+4. The adaptive weighting layer gives more weight to experts that fit the current regime.
+5. The blended output becomes the median path and upper/lower range.
+6. The path is reconstructed back into price space and rendered on the chart.
+7. AI market commentary explains the forecast using news and chart context.
 
-What LLM/event context does:
+## Inputs And Outputs
 
-- provides context to the gating network
-- helps adjust uncertainty/confidence
-- adds regime/event state as auxiliary features
+The names below are user-readable data groups rather than code variable names. Tensor sizes are the actual model sizes.
 
-What LLM/event context does not do:
+| Data Group | Size | Meaning |
+| --- | --- | --- |
+| Price data | `[batch, 128, 23]` | Crude price, volume, volatility, momentum, trend, and range position |
+| Related-market data | `[batch, 128, 6]` | Brent, gas, gasoline, heating oil, dollar, rates, equities, and similar supporting signals |
+| News/event data | `[batch, 13]` | News/event tone summarized into pressure, importance, uncertainty, and related context |
+| Current-state data | `[batch, 4]` | Current price, recent volatility, lookback length, and forecast length |
+| Forecast range | `[batch, 30, 7]` | Lower, middle, and upper paths for up to 30 future steps. The UI displays the selected 7, 14, or 30 leading steps |
+| Upside probability | `[batch, 30]` | Directional lean by future step |
+| Expected volatility | `[batch, 30]` | Expected movement size by future step |
+| Model confidence | `[batch, 1]` | Internal stability score for the current input state |
 
-- directly generate price paths
-- directly generate p50/p90
-- overwrite time-series model outputs
+## Forecast Target
 
-Layer structure:
-
-| Stage | Structure |
-| --- | --- |
-| Shared projection | `x_price: 23 -> 48`, `x_cross_asset: 6 -> 48`, concatenated to `[B,128,96]` |
-| Shared sequence encoder | LSTM last hidden `[B,48]`, TCN representation `[B,48]` |
-| Expert heads | LSTM expert `MLP(48 -> 56)`, TCN expert `MLP(48 -> 56)`, baseline adapter `MLP(4 -> 56)`, motif adapter `MLP(4 -> 56)` |
-| Gating network | `x_event_context [B,13] + x_static [B,4] + LSTM [B,48] + TCN [B,48] -> MLP(113 -> 4)`, softmax expert weights |
-| Mixture | Four expert paths `[B,8,7]` are weighted by the softmax outputs, then quantile monotonicity is enforced with `sort` |
-| Auxiliary heads | Direction/volatility use `MLP(48+48+4 -> 8)`, confidence uses `MLP(13+4 -> 1)` and is reduced by event uncertainty |
-
-## Framework Decision
-
-The current deep learning code already uses PyTorch.
-
-- Models inherit from `torch.nn.Module`.
-- LSTM layers use `torch.nn.LSTM`.
-- Training uses `torch.utils.data.DataLoader`, `torch.optim.AdamW`, and gradient clipping.
-- Use `--device mps` on Apple Silicon and `--device cuda` on NVIDIA systems for acceleration.
-
-A direct rewrite to TensorFlow/Keras is unlikely to make this project faster. The current bottlenecks are not framework overhead; they are:
-
-- LLM event-context generation speed and API quota
-- short news history
-- repeated deep inference dataset construction during walk-forward backtests
-- weak predictive signal relative to simple baselines
-
-The higher-impact improvements are LLM context cache/resume, longer historical news coverage, backtest inference caching, and stricter time-split/coverage evaluation.
-
-## Quantiles And Calibration
-
-Quantile paths must be monotonic. Rolling backtest residuals can produce calibration artifacts.
+The model does not memorize raw future prices. It first learns how much price tends to move relative to recent volatility, then converts that movement back into price.
 
 ```text
-artifacts/calibration/{model}_{symbol}_{interval}.json
+volatility-adjusted future move = future cumulative log return / recent realized volatility
+future price = current price * exp(predicted cumulative log return)
 ```
 
-Until calibration artifacts are sufficiently validated, probabilistic bands are residual-volatility adapters, not validated confidence intervals.
+This makes learning more stable when the absolute oil price level changes.
 
-## Artifacts And Metadata
+## How Forecast Length Changes
 
-- `.npz` legacy/global artifacts: `artifacts/models`
-- `.pt` deep artifacts: `artifacts/models`
-- metadata JSON: `artifacts/metadata`
+One model can vary forecast length, but only within a designed limit.
 
-Metadata should include at least model id, interval, horizon, lookback, training window, train/validation loss, feature sources, and a data hash or manifest reference.
+The current design trains one h30 artifact per interval. When the user selects 7 or 14, the backend runs the same 30-step path and returns the leading segment. For example, 1D with length 7 displays the first 7 days from the 30-day path, and 1H with length 14 displays the first 14 hours from the 30-hour path.
 
-## Currently Trainable Setup
+This keeps 7/14/30 views consistent because they come from the same forecast path rather than separate models. Technically the backend can display any length from 1 to 30, but the UI offers 7, 14, and 30 because those are easier choices for users.
 
-The current processed data supports this setup:
+Longer than 30 steps should not be produced by repeatedly chaining the same model because errors compound quickly. If 60- or 90-step forecasts are needed, separate h60/h90 artifacts should be trained and evaluated.
+
+## Current Coverage And Extension Strategy
+
+The operating UI offers only 1D and 1H. 15M/30M are not merely hidden; they are kept as research candidates because the available history is short and news/supply release timestamps need stronger alignment before minute-level production use.
+
+| Interval | UI Lengths | Model Artifact | Status |
+| --- | --- | --- | --- |
+| 1D | 7, 14, 30 | h30 | Production artifact exists |
+| 1H | 7, 14, 30 | h30 | Production artifact exists |
+| 30M | Excluded | Research candidate | Needs longer history and better news/supply timing |
+| 15M | Excluded | Research candidate | Noisy and short-history; needs separate validation |
+
+The practical extension order is:
+
+1. Use 1D h30 as the main operational model.
+2. Train 1H h30 to add hourly forecasts.
+3. Record SSE, MSE, RMSE, MAE, R2, MAPE, sMAPE, and directional accuracy for every artifact.
+4. Add calibration artifacts after enough rolling backtest origins exist.
+5. Revisit 30M/15M only after data coverage and timestamp alignment are improved.
+
+## 2026-06-02 Retraining Status
+
+The current operational model uses five energy futures (`CL=F`, `BZ=F`, `NG=F`, `RB=F`, `HO=F`) plus EIA/CFTC/FRED/news data.
+
+| Model | Train/Val/Test | Validation Loss | Epochs | Validation RMSE/MAE/MAPE/R2 | Test RMSE/MAE/MAPE/sMAPE/R2/Dir |
+| --- | --- | --- | --- | --- | --- |
+| `oil_context_fusion` h8 | 8,330 / 1,784 / 1,784 | 1.268454 | 5 | 1.8478 / 0.9604 / 3.7870 / 0.9976 | 2.8005 / 1.1839 / 4.5385 / 4.5023 / 0.9933 / 0.5081 |
+| `oil_context_fusion` 1D h30 | 8,252 / 1,768 / 1,768 | 2.280637 | 3 | 3.1088 / 1.6629 / 6.7388 / 0.9933 | 3.5934 / 1.7190 / 7.3365 / 7.2447 / 0.9882 / 0.5121 |
+| `oil_context_fusion` 1H h30 | 45,962 / 9,849 / 9,849 | 2.116694 | 4 | 0.4963 / 0.2618 / 1.2760 / 0.9997 | 2.1368 / 0.8477 / 2.4915 / 2.4764 / 0.9971 / 0.5176 |
+| `oil_context_fusion` h45 | 8,201 / 1,756 / 1,756 | 2.738672 | 5 | 3.7215 / 1.9963 / 8.2020 / 0.9905 | 3.9224 / 1.9581 / 8.4560 / 8.3556 / 0.9853 / 0.5115 |
+
+h8/h45 are previous experiments. The operating UI now uses the h30 artifact and displays 7/14/30 leading lengths.
+
+## Training Command
+
+1D h30 example:
 
 ```bash
 .venv/bin/python scripts/train/train_deep_fusion_models.py \
-  --model both \
+  --model oil_context_fusion \
   --interval 1d \
-  --horizon 8 \
+  --horizon 30 \
   --lookback 128 \
-  --universe research_core \
+  --universe oil_core \
+  --llm-context \
+  --event-context data/processed/event_context/event_context_daily.csv \
   --use-processed-data \
   --market-panel data/processed/market_panel/1d/panel.csv \
   --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
   --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
-  --event-context data/processed/event_context/event_context_daily.csv \
-  --max-samples 512 \
-  --epochs 3 \
+  --macro-panel data/processed/macro_panel/fred_daily_wide.csv \
+  --max-samples 0 \
+  --epochs 5 \
+  --patience 2 \
   --batch-size 64 \
   --device mps \
   --force
 ```
 
-`horizon=45` is also possible, but LLM context impact should be interpreted cautiously if news/event context history is short.
+For other intervals, change `--interval`, `--horizon`, `--lookback`, and `--market-panel` to the target interval while keeping the same model structure.
 
-## Why Models Were Removed
+## Artifacts And Metadata
 
-- `lstm`/`tcn`: live cached training made reproducibility and operations weak.
-- `cycle`: cycle phase/strength is more useful as a feature than as standalone extrapolation.
-- `ensemble`: fixed-weight mixes cannot learn regime/context behavior, so they were replaced by learned MoE.
+- Model artifacts: `artifacts/models`
+- Metadata JSON: `artifacts/metadata`
+- Smoke artifacts: `artifacts/smoke`
+
+Metadata records model name, interval, horizon, training window, input data paths, expert list, SSE/MSE/RMSE/MAE/R2/MAPE/sMAPE, and directional accuracy.
+
+## Removed Or Internalized Models
+
+- `lstm`, `tcn`: no longer standalone operational models; they are internal experts.
+- `motif`, `pattern_mlp`: no longer user-facing model choices; they are internal experts.
+- `cycle`: more useful as a feature than as a standalone extrapolator.
+- `ensemble`: fixed weighting was replaced by learned adaptive weighting.

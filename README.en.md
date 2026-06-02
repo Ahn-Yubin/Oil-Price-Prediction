@@ -1,6 +1,6 @@
-# Universal Market Forecasting Dashboard
+# Oil Price Forecasting Dashboard
 
-This repository is evolving from an oil dashboard into a universal market forecasting platform built with FastAPI, `market_ai`, and a frontend chart overlay. Oil and energy markets are the first use case. The goal is to combine price data, fundamentals, news/LLM context, deep forecasts, and chart overlays into one operational workflow.
+This repository is an oil-price-only forecasting system built with FastAPI, `market_ai`, and a frontend chart overlay. The goal is to combine the WTI crude oil (`CL=F`) chart, energy/macro indicators, news/LLM context, one unified deep forecasting model, and chart overlays into one operational workflow.
 
 Korean documentation is primary. See [README.md](README.md). New contributors should start with [Project Status](docs/en/PROJECT_STATUS.md).
 
@@ -11,6 +11,7 @@ Korean documentation is primary. See [README.md](README.md). New contributors sh
 - The LLM is a context/event encoder, not a numeric price forecaster.
 - The forecast target is a volatility-scaled cumulative log return distribution.
 - Forecast prices are reconstructed with `price_t+h = current_price * exp(predicted_cumulative_log_return_h)`.
+- The only user-facing forecast model is `oil_context_fusion`.
 - `.pt`/`.npz` artifacts live in `artifacts/models`; metadata JSON lives in `artifacts/metadata`.
 - Korean docs and English mirror docs must keep the same relative path structure.
 
@@ -27,7 +28,7 @@ Main APIs:
 - `GET /api/data-status?symbol=CL=F&interval=1d`
 - `GET /api/forecast?symbol=CL=F&interval=1d`
 - `GET /api/chart?symbol=CL=F&interval=1d`
-- `GET /api/market-context?symbol=NYMEX:CL1%21&interval=1d`
+- `GET /api/market-context?symbol=CL=F&interval=1d`
 - `GET /api/explanation`
 - `GET /api/backtests`
 
@@ -38,6 +39,7 @@ The currently usable training data includes:
 - `data/processed/market_panel/{interval}/panel.csv`: `1d`, `1h`, `30m`, and `15m` market panels
 - `data/processed/oil_fundamentals/eia_weekly.csv`: EIA weekly petroleum data
 - `data/processed/oil_fundamentals/cftc_cot_weekly.csv`: CFTC COT weekly positioning data
+- `data/processed/macro_panel/fred_daily_wide.csv`: FRED macro data such as rates, FX, dollar, and VIX series
 - `data/raw/news/public_market_news.csv`: public news text
 - `data/processed/event_context/event_context_daily.csv`: news/event context vectors
 - `data/manifests/data_inventory.json`: data inventory
@@ -95,7 +97,7 @@ See [LLM Context](docs/en/LLM_CONTEXT.md).
 ## Data Build
 
 ```bash
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1d --period 10y
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
 .venv/bin/python scripts/data/fetch_eia_petroleum.py
 .venv/bin/python scripts/data/fetch_cftc_cot.py
 .venv/bin/python scripts/data/build_event_context.py --news-path data/raw/news/public_market_news.csv --symbols CL=F,BZ=F,NG=F --mode local_rules
@@ -106,7 +108,7 @@ Public-data orchestration:
 
 ```bash
 .venv/bin/python scripts/data/build_real_dataset.py \
-  --universe research_core \
+  --universe oil_core \
   --interval 1d \
   --period 10y \
   --news-timespan 3m \
@@ -115,28 +117,29 @@ Public-data orchestration:
 
 ## Training
 
-Deep model training with current processed data:
+Training the single unified oil model with current processed data:
 
 ```bash
 .venv/bin/python scripts/train/train_deep_fusion_models.py \
-  --model both \
+  --model oil_context_fusion \
   --interval 1d \
-  --horizon 8 \
+  --horizon 30 \
   --lookback 128 \
-  --universe research_core \
+  --universe oil_core \
   --use-processed-data \
   --market-panel data/processed/market_panel/1d/panel.csv \
   --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
   --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
+  --macro-panel data/processed/macro_panel/fred_daily_wide.csv \
   --event-context data/processed/event_context/event_context_daily.csv \
-  --max-samples 512 \
-  --epochs 3 \
+  --max-samples 0 \
+  --epochs 5 \
   --batch-size 64 \
   --device mps \
   --force
 ```
 
-`llm_context_seq_moe` consumes `event_context_daily.csv`. `deep_lstm_tcn_fusion` can train on the same processed price/fundamental data.
+`oil_context_fusion` merges the LSTM/TCN price encoders from `deep_lstm_tcn_fusion` with the context-gated expert structure from `llm_context_seq_moe`, and includes attention/pattern/motif expert branches. It consumes price features, related energy/macro markets, EIA/CFTC fundamentals, FRED macro data, and news/event context vectors.
 
 ## Validation
 

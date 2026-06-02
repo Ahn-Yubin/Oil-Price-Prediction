@@ -14,7 +14,7 @@ from market_ai.schemas.market import AssetClass, ModelInfo, ModelMetadata
 
 MODEL_FILENAME_RE = re.compile(r"global_dl_(?P<interval>.+)_h(?P<horizon>\d+)\.npz$")
 DEEP_MODEL_FILENAME_RE = re.compile(
-    r"(?P<model_name>deep_lstm_tcn_fusion|llm_context_seq_moe)_(?P<interval>.+)_h(?P<horizon>\d+)\.pt$"
+    r"(?P<model_name>oil_context_fusion|deep_lstm_tcn_fusion|llm_context_seq_moe)_(?P<interval>.+)_h(?P<horizon>\d+)\.pt$"
 )
 
 

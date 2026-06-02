@@ -18,12 +18,12 @@ from market_ai.config import PROJECT_DIR
 from market_ai.constants import INTERVAL_TO_HORIZON
 
 
-DEFAULT_MODELS = "random_walk,drift,seasonal_naive,volatility_scaled_naive,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe"
+DEFAULT_MODELS = "oil_context_fusion,random_walk,drift,motif,pattern_mlp"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a multi-symbol rolling model leaderboard.")
-    parser.add_argument("--symbols", default="CL=F,BZ=F,NG=F")
+    parser.add_argument("--symbols", default="CL=F")
     parser.add_argument("--interval", default="1d", choices=["1d", "1h", "30m", "15m"])
     parser.add_argument("--models", default=DEFAULT_MODELS)
     parser.add_argument("--max-origins", type=int, default=50)

@@ -252,19 +252,13 @@ def forecast_mlp(close: np.ndarray, interval: str, horizon: int) -> ForecastResu
     return ForecastResult("pattern_mlp", np.log(np.asarray(mean, dtype=np.float64) / base))
 
 
-def forecast_deep_lstm_tcn_fusion(close: np.ndarray, interval: str, horizon: int) -> ForecastResult:
-    model = forecast_with_deep_model(model_name="deep_lstm_tcn_fusion", close=close, interval=interval, horizon=horizon)
+def forecast_oil_context_fusion(close: np.ndarray, interval: str, horizon: int) -> ForecastResult:
+    model = forecast_with_deep_model(model_name="oil_context_fusion", close=close, interval=interval, horizon=horizon)
     base = float(close[-1])
-    return ForecastResult("deep_lstm_tcn_fusion", np.log(np.asarray(model["values"], dtype=np.float64) / base))
+    return ForecastResult("oil_context_fusion", np.log(np.asarray(model["values"], dtype=np.float64) / base))
 
 
-def forecast_llm_context_seq_moe(close: np.ndarray, interval: str, horizon: int) -> ForecastResult:
-    model = forecast_with_deep_model(model_name="llm_context_seq_moe", close=close, interval=interval, horizon=horizon)
-    base = float(close[-1])
-    return ForecastResult("llm_context_seq_moe", np.log(np.asarray(model["values"], dtype=np.float64) / base))
-
-
-DEEP_MODEL_NAMES = {"deep_lstm_tcn_fusion", "llm_context_seq_moe"}
+DEEP_MODEL_NAMES = {"oil_context_fusion"}
 
 
 FORECASTERS = {
@@ -276,8 +270,7 @@ FORECASTERS = {
     "simple_moving_average_path": forecast_simple_moving_average_path,
     "motif": forecast_motif,
     "pattern_mlp": forecast_mlp,
-    "deep_lstm_tcn_fusion": forecast_deep_lstm_tcn_fusion,
-    "llm_context_seq_moe": forecast_llm_context_seq_moe,
+    "oil_context_fusion": forecast_oil_context_fusion,
 }
 
 
@@ -495,7 +488,7 @@ def run_rolling_backtest(
     include_regime_breakdown: bool,
 ) -> dict[str, pd.DataFrame]:
     close = _clean_close(close)
-    removed = [name for name in model_names if name in REMOVED_LEGACY_MODELS]
+    removed = [name for name in model_names if name in REMOVED_LEGACY_MODELS and name not in FORECASTERS]
     if removed:
         raise ValueError(f"Removed/deprecated model(s) requested: {removed}")
     unknown = [name for name in model_names if name not in FORECASTERS]
@@ -749,7 +742,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--stride", type=int, default=0, help="Backward-compatible alias for --step")
     p.add_argument(
         "--models",
-        default="random_walk,drift,seasonal_naive,volatility_scaled_naive,flat,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe",
+        default="oil_context_fusion,random_walk,drift,motif,pattern_mlp",
         help="Comma-separated model list. Available: " + ",".join(FORECASTERS.keys()),
     )
     return p.parse_args()
@@ -761,7 +754,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_dir = output_dir / "plots"
     plot_dir.mkdir(parents=True, exist_ok=True)
-    intervals = [args.interval] if args.interval else ["1d", "1h", "30m", "15m"]
+    intervals = [args.interval] if args.interval else ["1d", "1h"]
     model_names = [m.strip() for m in args.models.split(",") if m.strip()]
     removed = [m for m in model_names if m in REMOVED_LEGACY_MODELS]
     if removed:

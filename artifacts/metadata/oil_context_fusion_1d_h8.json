@@ -1,0 +1,99 @@
+{
+  "model_name": "oil_context_fusion",
+  "model_type": "deep_sequence",
+  "version": "oil_context_fusion_v2",
+  "artifact_file": "oil_context_fusion_1d_h8.pt",
+  "interval": "1d",
+  "created_at": "2026-06-01T15:07:00.232442+00:00",
+  "train_start": "2016-11-09T00:00:00+00:00",
+  "train_end": "2026-04-28T00:00:00+00:00",
+  "training_cutoff": "2026-04-28T00:00:00+00:00",
+  "asset_universe": [
+    "CL=F",
+    "BZ=F",
+    "NG=F",
+    "RB=F",
+    "HO=F"
+  ],
+  "supported_asset_classes": [
+    "unknown"
+  ],
+  "supported_intervals": [
+    "1d"
+  ],
+  "lookback": 128,
+  "horizon": 8,
+  "target": "volatility_scaled_cumulative_log_return_distribution",
+  "feature_set": "deep_price_v1",
+  "scaler": "recent_realized_volatility",
+  "n_train": 8330,
+  "n_val": 1784,
+  "n_test": 1784,
+  "data_source": "processed",
+  "synthetic_used": false,
+  "event_context_enabled": true,
+  "events_path": [
+    "data/raw/news/public_market_news.csv"
+  ],
+  "related_assets_enabled": true,
+  "expert_systems": [
+    "lstm",
+    "tcn",
+    "attention",
+    "context",
+    "pattern",
+    "motif"
+  ],
+  "data_inputs": {
+    "market_panel": "data/processed/market_panel/1d/panel.csv",
+    "oil_fundamentals": "data/processed/oil_fundamentals/eia_weekly.csv",
+    "cot": "data/processed/oil_fundamentals/cftc_cot_weekly.csv",
+    "cme_curve": null,
+    "macro_panel": "data/processed/macro_panel/fred_daily_wide.csv",
+    "event_context": "data/processed/event_context/event_context_daily.csv"
+  },
+  "git_commit": "b0f2554",
+  "metrics": {
+    "train_loss": 1.3175072146736029,
+    "validation_loss": 1.2684537704501833,
+    "epochs_ran": 5,
+    "n_train": 8330,
+    "n_val": 1784,
+    "n_test": 1784,
+    "validation_sse": 48730.29143393644,
+    "validation_mse": 3.4143982226693135,
+    "validation_rmse": 1.8478090330630255,
+    "validation_mae": 0.9603711278629128,
+    "validation_r2": 0.9976433330403263,
+    "validation_mape": 3.787000774680991,
+    "validation_smape": 3.757733751383794,
+    "validation_directional_accuracy": 0.5011210762331838,
+    "test_sse": 111932.47660754451,
+    "test_mse": 7.842802452882883,
+    "test_rmse": 2.800500393301683,
+    "test_mae": 1.1838772621265492,
+    "test_r2": 0.9932504555264625,
+    "test_mape": 4.538524311894725,
+    "test_smape": 4.502251632625259,
+    "test_directional_accuracy": 0.508057735426009
+  },
+  "notes": null,
+  "status": "available",
+  "deep_config": {
+    "price_feature_dim": 23,
+    "cross_asset_dim": 6,
+    "event_context_dim": 13,
+    "static_dim": 4,
+    "horizon": 8,
+    "hidden_dim": 72,
+    "dropout": 0.12,
+    "expert_names": [
+      "lstm",
+      "tcn",
+      "attention",
+      "context",
+      "pattern",
+      "motif"
+    ]
+  }
+}

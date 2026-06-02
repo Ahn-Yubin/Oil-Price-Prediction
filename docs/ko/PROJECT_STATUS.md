@@ -4,7 +4,7 @@
 
 ## 한 줄 요약
 
-프로젝트는 유가 전용 dashboard에서 범용 시장 예측 플랫폼으로 전환된 상태입니다. FastAPI backend, `market_ai` 도메인 로직, frontend chart overlay, 데이터 수집 CLI, deep learning 학습 CLI, model artifact/metadata가 분리되어 있습니다.
+프로젝트는 다시 WTI 유가(`CL=F`) 예측 전용 dashboard와 단일 모델 운영 구조로 전환된 상태입니다. FastAPI backend, `market_ai` 도메인 로직, frontend chart overlay, 데이터 수집 CLI, deep learning 학습 CLI, model artifact/metadata가 분리되어 있습니다.
 
 현재 학습 가능한 핵심 데이터는 가격 panel, EIA weekly petroleum, CFTC COT, 공개 뉴스, event context입니다. CME futures curve 장기 데이터와 더 긴 뉴스 history, calibration residual은 아직 보강 대상입니다.
 
@@ -13,12 +13,12 @@
 | 영역 | 상태 |
 | --- | --- |
 | Backend | `backend.app.main:app` 기준 FastAPI app. `/api/forecast`, `/api/chart`, `/api/market-context` 제공 |
-| Frontend | forecast overlay, context marker, 뉴스/context panel, scenario commentary 표시 |
-| Market data | yfinance 기반 `research_core` panel 구축 가능 |
+| Frontend | 검색 심볼 입력 없이 항상 `CL=F` forecast overlay, context marker, 뉴스/context panel 표시 |
+| Market data | yfinance 기반 `oil_core`와 보조 macro/related market panel 구축 가능 |
 | Fundamentals | EIA bulk, CFTC ZIP/manual CSV ingest 가능 |
 | CME | manual CSV ingest 가능. licensed CSV 확보 필요 |
 | News/context | Yahoo RSS/GDELT public news 수집, local_rules 또는 external LLM context 생성 |
-| Deep learning | `deep_lstm_tcn_fusion`, `llm_context_seq_moe` 학습/metadata 저장 가능 |
+| Deep learning | 사용자-facing 단일 모델 `oil_context_fusion` 학습/metadata 저장 가능 |
 | Backtest/calibration | rolling backtest와 calibration script 존재. 충분한 coverage 검증은 별도 실행 필요 |
 | Docs | 한국어/영어 mirror 구조 유지 |
 
@@ -61,17 +61,16 @@ target = future cumulative log return / recent realized volatility
 price_t+h = current_price * exp(predicted_cumulative_log_return_h)
 ```
 
-LLM은 뉴스/이벤트를 context vector로 변환하고, `llm_context_seq_moe`의 gating/confidence/uncertainty에 간접적으로 영향을 줍니다. LLM output이 price, target price, p50/p90, future return path를 생성하거나 덮어쓰면 안 됩니다.
+LLM은 뉴스/이벤트를 context vector로 변환하고, `oil_context_fusion`의 context expert/gating/confidence/uncertainty에 간접적으로 영향을 줍니다. LLM output이 price, target price, p50/p90, future return path를 생성하거나 덮어쓰면 안 됩니다.
 
 ## 모델 상태
 
 | 모델 | 분류 | 상태 |
 | --- | --- | --- |
-| `motif` | Classical | 사용 가능 |
-| `pattern_mlp` | Deep `.npz` | interval별 artifact 사용 |
-| `deep_lstm_tcn_fusion` | Deep `.pt` | processed data 학습 가능 |
-| `llm_context_seq_moe` | Deep `.pt` + event context | LLM/event context input 사용 가능 |
-| `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive` | Baseline | 사용 가능 |
+| `oil_context_fusion` | Unified deep `.pt` | 사용자-facing 단일 운영 모델. LSTM, TCN, attention, context expert를 통합 |
+| `motif`, `pattern_mlp` | Internal benchmark | 운영 선택지는 아니며 fallback/backtest 비교용 |
+| `deep_lstm_tcn_fusion`, `llm_context_seq_moe` | Legacy merged | 구조가 `oil_context_fusion`으로 통합됨 |
+| `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive` | Baseline | backtest/fallback 비교용 |
 | `flat`, `simple_moving_average_path`, `regime_ensemble` | Backtest-only | 운영 forecast default 아님 |
 | `cycle`, `lstm`, `tcn`, `ensemble` | Removed/deprecated | active model 아님 |
 
@@ -86,6 +85,7 @@ LLM은 뉴스/이벤트를 context vector로 변환하고, `llm_context_seq_moe`
 | Market panel | `data/processed/market_panel/{interval}/panel.csv` | `1d`, `1h`, `30m`, `15m` 가격 panel |
 | EIA weekly | `data/processed/oil_fundamentals/eia_weekly.csv` | 장기 petroleum weekly series |
 | CFTC COT | `data/processed/oil_fundamentals/cftc_cot_weekly.csv` | weekly positioning series |
+| FRED macro | `data/processed/macro_panel/fred_daily_wide.csv` | 금리, 환율, 달러, VIX 등 macro series |
 | News | `data/raw/news/public_market_news.csv` | 공개 뉴스 원문 |
 | Event context | `data/processed/event_context/event_context_daily.csv` | daily LLM/local context vector |
 | Inventory | `data/manifests/data_inventory.json` | 데이터 품질/기간/row count 기록 |
@@ -114,10 +114,13 @@ PY
 
 현재 보유 데이터로 학습은 가능합니다. 단, 해석은 다음처럼 제한해야 합니다.
 
-- `horizon=8`: 최근 뉴스 context와 겹치는 구간이 있어 LLM/event context 효과를 smoke 수준으로 확인하기 좋습니다.
-- `horizon=45`: 장기 예측 artifact는 만들 수 있지만, 뉴스 context history가 짧으면 event context 효과는 제한적입니다.
+- `horizon=30`: 운영 기준 artifact입니다. 화면의 7/14/30 선택지는 h30 경로의 앞부분을 잘라 표시합니다.
+- `horizon=7`, `horizon=14`: 별도 모델을 만들지 않고 h30 결과의 앞부분을 표시합니다. 같은 판단에서 나온 경로라 기간을 바꿔도 일관성이 높습니다.
+- 30보다 긴 기간은 반복 호출로 억지 연결하지 않고, 필요하면 별도 h60/h90 artifact를 학습해야 합니다.
 - CME curve가 없으면 term structure 관련 edge는 아직 빠집니다.
 - Calibration residual이 충분하지 않으면 band를 검증된 confidence interval이라고 부르면 안 됩니다.
+
+2026-06-02 기준 `oil_context_fusion` 1D/1H h30 artifact는 `oil_core` processed panel, EIA/CFTC/FRED macro, event context를 사용해 재학습되었습니다. 단일 artifact 내부 expert system은 `lstm`, `tcn`, `attention`, `context`, `pattern`, `motif`입니다. 1D h30은 train 8,252 / validation 1,768 / test 1,768 샘플, validation RMSE 3.1088, test RMSE 3.5934입니다. 1H h30은 train 45,962 / validation 9,849 / test 9,849 샘플, validation RMSE 0.4963, test RMSE 2.1368입니다.
 
 대표 학습 명령은 `docs/ko/OPERATIONS.md`의 학습 섹션을 기준으로 합니다.
 
@@ -138,7 +141,7 @@ PY
 
 1. `.env` 또는 shell export로 Google LLM live call 성공 여부 확인
 2. LLM context를 live로 재생성
-3. `llm_context_seq_moe`와 `deep_lstm_tcn_fusion` h8/h45 재학습
+3. `oil_context_fusion` 1D/1H h30 rolling backtest와 calibration
 4. CME settlement/curve CSV 확보 후 ingest
 5. rolling backtest와 quantile calibration 실행
 6. longer news history 적재

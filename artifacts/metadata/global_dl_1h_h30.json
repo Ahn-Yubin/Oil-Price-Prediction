@@ -1,0 +1,62 @@
+{
+  "model_name": "pattern_mlp",
+  "model_type": "global_dl_mlp",
+  "version": "global_mlp_v1",
+  "artifact_file": "global_dl_1h_h30.npz",
+  "interval": "1h",
+  "created_at": "2026-06-01T16:25:20.522005+00:00",
+  "train_start": null,
+  "train_end": null,
+  "training_cutoff": "2026-06-01T16:25:20.522753+00:00",
+  "asset_universe": [
+    "BZ=F",
+    "CL=F",
+    "DX-Y.NYB",
+    "EURUSD=X",
+    "GC=F",
+    "HG=F",
+    "HO=F",
+    "JPY=X",
+    "NG=F",
+    "QQQ",
+    "RB=F",
+    "SI=F",
+    "SPY",
+    "USDKRW=X",
+    "USO",
+    "XLE",
+    "^GSPC",
+    "^VIX"
+  ],
+  "supported_asset_classes": [
+    "unknown"
+  ],
+  "supported_intervals": [
+    "1h"
+  ],
+  "lookback": 96,
+  "horizon": 30,
+  "target": "volatility_scaled_cumulative_returns",
+  "feature_set": "pattern_features_v4_cum_path",
+  "scaler": "recent_realized_volatility",
+  "data_hash": null,
+  "git_commit": null,
+  "n_train": 16693,
+  "n_val": 2288,
+  "n_test": null,
+  "data_source": null,
+  "synthetic_used": null,
+  "event_context_enabled": null,
+  "events_path": [],
+  "related_assets_enabled": null,
+  "metrics": {
+    "val_mae_ret": 0.00537922652438283,
+    "val_rmse_ret": 0.012716483324766159,
+    "val_mape_pct": 0.5381866693496704,
+    "n_train": 16693,
+    "n_val": 2288
+  },
+  "notes": null,
+  "status": "available",
+  "deep_config": {}
+}

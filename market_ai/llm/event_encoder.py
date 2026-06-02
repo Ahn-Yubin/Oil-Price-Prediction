@@ -722,7 +722,7 @@ def deterministic_explanation(
         drivers.append("Structured event context is available but does not overwrite numeric forecasts.")
     warning = None
     if confidence is not None and float(confidence) < 0.45:
-        warning = "Model confidence is low; inspect data quality, volatility, and model disagreement."
+        warning = "Model confidence is low; inspect data quality, volatility, and context conflicts."
     if data_state != "real":
         warning = f"Forecast uses {data_state} data status; treat output as degraded."
     return ExplanationOutput(

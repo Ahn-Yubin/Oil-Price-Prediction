@@ -1,8 +1,8 @@
 # AI Agent Rules / AI 에이전트 규칙
 
-이 저장소는 유가 전용 dashboard에서 범용 시장 예측 플랫폼으로 확장 중입니다. 모든 변경은 아래 한국어 원칙과 영어 미러를 함께 따릅니다.
+이 저장소는 다시 유가 예측 전용 dashboard와 모델로 수렴 중입니다. 모든 변경은 아래 한국어 원칙과 영어 미러를 함께 따릅니다.
 
-This repository is moving from an oil-specific dashboard toward a universal market forecasting platform. Every change must follow both the Korean policy and the English mirror below.
+This repository is converging back to an oil-price-only forecasting dashboard and model. Every change must follow both the Korean policy and the English mirror below.
 
 ## 한국어 정책
 

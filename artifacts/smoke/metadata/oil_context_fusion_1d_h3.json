@@ -1,0 +1,83 @@
+{
+  "model_name": "oil_context_fusion",
+  "model_type": "deep_sequence",
+  "version": "oil_context_fusion_v2",
+  "artifact_file": "oil_context_fusion_1d_h3.pt",
+  "interval": "1d",
+  "created_at": "2026-05-29T11:18:06.318996+00:00",
+  "train_start": "2020-08-19T00:00:00+00:00",
+  "train_end": "2020-09-13T00:00:00+00:00",
+  "training_cutoff": "2020-09-13T00:00:00+00:00",
+  "asset_universe": [
+    "CL=F",
+    "BZ=F",
+    "NG=F",
+    "RB=F",
+    "HO=F"
+  ],
+  "supported_asset_classes": [
+    "unknown"
+  ],
+  "supported_intervals": [
+    "1d"
+  ],
+  "lookback": 16,
+  "horizon": 3,
+  "target": "volatility_scaled_cumulative_log_return_distribution",
+  "feature_set": "deep_price_v1",
+  "scaler": "recent_realized_volatility",
+  "n_train": 90,
+  "n_val": 19,
+  "n_test": 19,
+  "data_source": "synthetic",
+  "synthetic_used": true,
+  "event_context_enabled": true,
+  "events_path": [
+    "data/raw/news/public_market_news.csv"
+  ],
+  "related_assets_enabled": true,
+  "git_commit": "b0f2554",
+  "metrics": {
+    "train_loss": 1.417751337091128,
+    "validation_loss": 0.6655111014842987,
+    "epochs_ran": 1,
+    "n_train": 90,
+    "n_val": 19,
+    "n_test": 19,
+    "validation_sse": 20.051150356237386,
+    "validation_mse": 0.35177456765328746,
+    "validation_rmse": 0.5931058654686256,
+    "validation_mae": 0.4650316494421838,
+    "validation_r2": 0.9823687089684464,
+    "validation_mape": 0.5157668110369528,
+    "validation_smape": 0.5158003841709902,
+    "validation_directional_accuracy": 0.9824561403508771,
+    "test_sse": 15.545218356955443,
+    "test_mse": 0.2727231290693937,
+    "test_rmse": 0.5222290006016458,
+    "test_mae": 0.3803741139649849,
+    "test_r2": 0.9865224775088014,
+    "test_mape": 0.41319184995069014,
+    "test_smape": 0.4128930926382976,
+    "test_directional_accuracy": 0.9649122807017544
+  },
+  "notes": "Quick-test smoke artifact; not for production inference.",
+  "status": "smoke_only",
+  "deep_config": {
+    "price_feature_dim": 23,
+    "cross_asset_dim": 6,
+    "event_context_dim": 13,
+    "static_dim": 4,
+    "horizon": 3,
+    "hidden_dim": 72,
+    "dropout": 0.12,
+    "expert_names": [
+      "lstm",
+      "tcn",
+      "attention",
+      "context",
+      "pattern",
+      "motif"
+    ]
+  }
+}

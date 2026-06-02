@@ -43,8 +43,8 @@ UNIVERSE_PATH = PROJECT_DIR / "configs" / "symbol_universe.yaml"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build a real multi-source market research dataset.")
-    parser.add_argument("--universe", default="research_core")
+    parser = argparse.ArgumentParser(description="Build a real multi-source oil forecasting dataset.")
+    parser.add_argument("--universe", default="oil_core")
     parser.add_argument("--symbols", default="", help="Comma-separated override for the symbol universe.")
     parser.add_argument("--interval", choices=["1d", "1h", "30m", "15m"], default="1d")
     parser.add_argument("--period", default="10y")

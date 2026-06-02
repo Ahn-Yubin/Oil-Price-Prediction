@@ -1,12 +1,12 @@
 # Roadmap
 
-The project starts with oil forecasting and expands toward a universal market AI platform. The current priority order is data reliability, LLM context stabilization, retraining, backtest/calibration, and frontend operations.
+The project is stabilizing a WTI oil forecasting-only model and dashboard. The current priority order is data reliability, LLM context stabilization, single-model retraining, backtest/calibration, and frontend operations.
 
 ## Immediate Priorities
 
 1. Validate the Google Gemma/Gemini LLM connection live.
 2. Regenerate live LLM event context from `data/raw/news/public_market_news.csv`.
-3. Retrain `llm_context_seq_moe` and `deep_lstm_tcn_fusion` for h8/h45.
+3. Retrain `oil_context_fusion` for 1D/1H h30 and validate 7/14/30 display lengths.
 4. Acquire CME settlement/curve CSV and build `cme_curve_daily.csv`.
 5. Run rolling backtests and quantile calibration.
 6. Validate `/api/market-context` and frontend markers/panels on the actual chart.
@@ -21,8 +21,8 @@ The project starts with oil forecasting and expands toward a universal market AI
 
 ## Model Expansion
 
-- Stabilize oil/energy models in `research_core`.
-- Expand the universe to ETFs, FX, metals, indices, rates, and crypto.
+- Stabilize the oil/energy model in `oil_core`.
+- Keep ETFs, FX, metals, indices, rates, and crypto as auxiliary oil features rather than independent forecast targets.
 - Keep the LLM as a context encoder only; numeric forecasts remain owned by time-series models.
 - Use calibrated interval language only after coverage has been measured.
 

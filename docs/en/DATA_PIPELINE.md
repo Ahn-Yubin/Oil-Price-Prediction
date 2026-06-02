@@ -12,7 +12,7 @@ The current processed datasets are organized as follows.
 | EIA petroleum | `data/processed/oil_fundamentals/eia_weekly.csv` | EIA petroleum weekly bulk supply/inventory series | Oil fundamental features |
 | CFTC COT | `data/processed/oil_fundamentals/cftc_cot_weekly.csv` | CFTC Commitment of Traders positioning | Managed money/commercial positioning features |
 | Macro panel | `data/processed/macro_panel/fred_daily_wide.csv` | FRED macro rates/indices daily wide panel | Macro/rates cross-asset features |
-| Event context | `data/processed/event_context/event_context_daily.csv` | Daily context vectors generated from news/events | `llm_context_seq_moe` event/context input |
+| Event context | `data/processed/event_context/event_context_daily.csv` | Daily context vectors generated from news/events | `oil_context_fusion` event/context input |
 | Raw news | `data/raw/news/public_market_news.csv` | Public news text from Yahoo Finance RSS, Google News RSS, and GDELT | LLM context input |
 | Manifest | `data/manifests/data_inventory.json` | Dataset rows, date ranges, sources, and point-in-time safety flags | Data monitoring and reproducibility |
 
@@ -20,7 +20,7 @@ EIA/CFTC data is weekly and is forward-filled into daily samples using conservat
 
 ## Current Symbol Universe
 
-The current `research_core` universe contains 18 symbols.
+The operational training target is the `oil_core` universe; FX, metal, equity, and volatility symbols from `research_core` can remain auxiliary cross-asset features.
 
 | Category | Symbols | Count | Use |
 | --- | --- | ---: | --- |
@@ -45,7 +45,7 @@ Current dataset sizes:
 
 Sufficiency assessment:
 
-- Daily price, supply, inventory, and positioning data are enough to run h8/h45 experiments.
+- Daily price, supply, inventory, and positioning data are enough to run h30 operating artifacts and 7/14/30 display-length experiments.
 - 30m/15m data is too short for reliable deep model generalization tests.
 - News volume increased from 340 rows to 2,240 rows, but it still starts in January 2026 and is too short for long-regime learning.
 - `event_context_daily` has not yet been rebuilt from the full 2,240-row news file. Because the LLM API limit is 500 calls per day, this should be processed across several runs using cache/resume.
@@ -55,7 +55,7 @@ Sufficiency assessment:
 | Missing Data | Impact | Resolution |
 | --- | --- | --- |
 | Long-history CME futures curve/settlements | Limited term structure, roll yield, and curve slope features | Acquire CME DataMine/settlement CSV and ingest with `fetch_cme_settlements.py --manual-csv` |
-| Longer news history | `llm_context_seq_moe` has limited long-regime news reaction data | Split GDELT requests by period or add licensed news CSV through `NEWS_EVENTS_PATH` |
+| Longer news history | `oil_context_fusion` has limited long-regime news reaction data | Split GDELT requests by period or add licensed news CSV through `NEWS_EVENTS_PATH` |
 | Measured calibration residuals | Forecast bands cannot be called validated confidence intervals | Run rolling backtests and then `scripts/evaluate/calibrate_quantiles.py` |
 | Intraday fundamental/event alignment | Weekly/daily features have coarse release timing for sub-daily intervals | Improve `feature_available_at` with actual release timestamps |
 | Vendor-grade market data | yfinance can have gaps, revisions, or delays | Add Stooq, broker/vendor CSV, or database providers as additional sources |
@@ -88,10 +88,10 @@ Providers separate raw cache and processed output. Failures are reported through
 ## Market Panel
 
 ```bash
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1d --period 10y
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1h --period 730d
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 30m --period 60d
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 15m --period 60d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 1h --period 730d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 30m --period 60d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 15m --period 60d
 ```
 
 The preferred output is `data/processed/market_panel/{interval}/panel.parquet`. If a parquet engine is unavailable, the pipeline writes `panel.csv`, which the current training commands can read.
@@ -164,7 +164,7 @@ Build the available public datasets in one run:
 
 ```bash
 .venv/bin/python scripts/data/build_real_dataset.py \
-  --universe research_core \
+  --universe oil_core \
   --interval 1d \
   --period 10y \
   --news-timespan 3m \

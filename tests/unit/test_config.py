@@ -6,7 +6,7 @@ from market_ai.config import PROJECT_DIR, Settings
 def test_settings_defaults_are_portable():
     settings = Settings.from_env({})
     assert settings.app_env == "development"
-    assert settings.default_symbol == "NYMEX:CL1!"
+    assert settings.default_symbol == "CL=F"
     assert settings.default_interval == "1d"
     assert settings.model_dir == PROJECT_DIR / "artifacts" / "models"
     assert settings.metadata_dir == PROJECT_DIR / "artifacts" / "metadata"

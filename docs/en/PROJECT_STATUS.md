@@ -4,7 +4,7 @@ This document is the current canonical status map for the repository. Older audi
 
 ## One-Line Summary
 
-The project has moved from an oil-only dashboard toward a universal market forecasting platform. FastAPI backend, `market_ai` domain logic, frontend chart overlay, data CLIs, deep learning training CLIs, and model artifacts/metadata are separated.
+The project has moved back to a WTI oil (`CL=F`) forecasting-only dashboard with one operational user-facing model. FastAPI backend, `market_ai` domain logic, frontend chart overlay, data CLIs, deep learning training CLIs, and model artifacts/metadata are separated.
 
 The currently usable training data includes price panels, EIA weekly petroleum data, CFTC COT data, public news, and event context. Long-history CME futures curve data, longer news history, and calibration residuals still need work.
 
@@ -13,12 +13,12 @@ The currently usable training data includes price panels, EIA weekly petroleum d
 | Area | Status |
 | --- | --- |
 | Backend | FastAPI app at `backend.app.main:app`; provides `/api/forecast`, `/api/chart`, and `/api/market-context` |
-| Frontend | Forecast overlay, context markers, news/context panel, and scenario commentary |
-| Market data | yfinance-based `research_core` panels can be built |
+| Frontend | Always shows `CL=F` forecast overlay, context markers, and news/context panel without a symbol search input |
+| Market data | yfinance-based `oil_core` plus auxiliary macro/related market panels can be built |
 | Fundamentals | EIA bulk and CFTC ZIP/manual CSV ingestion available |
 | CME | Manual CSV ingestion available; licensed CSV still needed |
 | News/context | Yahoo RSS/GDELT public news collection and local_rules/external LLM context generation |
-| Deep learning | `deep_lstm_tcn_fusion` and `llm_context_seq_moe` training and metadata storage |
+| Deep learning | Single user-facing `oil_context_fusion` training and metadata storage |
 | Backtest/calibration | Rolling backtest and calibration scripts exist; sufficient coverage validation must still be run |
 | Docs | Korean/English mirror structure maintained |
 
@@ -61,17 +61,16 @@ target = future cumulative log return / recent realized volatility
 price_t+h = current_price * exp(predicted_cumulative_log_return_h)
 ```
 
-The LLM converts news/events into a context vector and can indirectly affect gating/confidence/uncertainty in `llm_context_seq_moe`. LLM output must not create or overwrite prices, target prices, p50/p90, or future return paths.
+The LLM converts news/events into a context vector and can indirectly affect context expert gating, confidence, and uncertainty in `oil_context_fusion`. LLM output must not create or overwrite prices, target prices, p50/p90, or future return paths.
 
 ## Model Status
 
 | Model | Class | Status |
 | --- | --- | --- |
-| `motif` | Classical | Available |
-| `pattern_mlp` | Deep `.npz` | Uses interval artifacts |
-| `deep_lstm_tcn_fusion` | Deep `.pt` | Can train on processed data |
-| `llm_context_seq_moe` | Deep `.pt` + event context | Consumes LLM/event context input |
-| `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive` | Baseline | Available |
+| `oil_context_fusion` | Unified deep `.pt` | Single user-facing operational model. Combines LSTM, TCN, attention, and context experts |
+| `motif`, `pattern_mlp` | Internal benchmark | Not operational choices; used for fallback/backtest comparison |
+| `deep_lstm_tcn_fusion`, `llm_context_seq_moe` | Legacy merged | Their structures are merged into `oil_context_fusion` |
+| `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive` | Baseline | Used for backtest/fallback comparison |
 | `flat`, `simple_moving_average_path`, `regime_ensemble` | Backtest-only | Not default operational forecast models |
 | `cycle`, `lstm`, `tcn`, `ensemble` | Removed/deprecated | Not active models |
 
@@ -86,6 +85,7 @@ Exact row counts and date ranges are tracked in `data/manifests/data_inventory.j
 | Market panel | `data/processed/market_panel/{interval}/panel.csv` | `1d`, `1h`, `30m`, and `15m` price panels |
 | EIA weekly | `data/processed/oil_fundamentals/eia_weekly.csv` | Long-history petroleum weekly series |
 | CFTC COT | `data/processed/oil_fundamentals/cftc_cot_weekly.csv` | Weekly positioning series |
+| FRED macro | `data/processed/macro_panel/fred_daily_wide.csv` | Macro series such as rates, FX, dollar, and VIX |
 | News | `data/raw/news/public_market_news.csv` | Public news text |
 | Event context | `data/processed/event_context/event_context_daily.csv` | Daily LLM/local context vectors |
 | Inventory | `data/manifests/data_inventory.json` | Data quality, date range, and row count records |
@@ -114,10 +114,13 @@ Success means `safety_check_passed=true` and no `External LLM fallback` warning.
 
 Yes, the current data can train models, with the following interpretation:
 
-- `horizon=8`: overlaps more with recent news context and is useful for smoke-level LLM/event context checks.
-- `horizon=45`: can produce longer-horizon artifacts, but event context impact is limited if news history is short.
+- `horizon=30`: the operating artifact length. The UI's 7/14/30 choices display leading segments from the h30 path.
+- `horizon=7` and `horizon=14`: use the leading part of the h30 result rather than separate models, keeping the displayed paths consistent.
+- Longer than 30 steps should use separately trained h60/h90 artifacts instead of recursively chaining h30 outputs.
 - Without CME curve data, term-structure edge is missing.
 - Without sufficient calibration residuals, bands must not be called validated confidence intervals.
+
+As of 2026-06-02, the `oil_context_fusion` 1D/1H h30 artifacts were retrained with the `oil_core` processed panel, EIA/CFTC/FRED macro data, and event context. The single artifact contains `lstm`, `tcn`, `attention`, `context`, `pattern`, and `motif` expert systems. 1D h30 uses 8,252 training / 1,768 validation / 1,768 test samples, validation RMSE 3.1088, and test RMSE 3.5934. 1H h30 uses 45,962 training / 9,849 validation / 9,849 test samples, validation RMSE 0.4963, and test RMSE 2.1368.
 
 Use the training section in `docs/en/OPERATIONS.md` as the source of truth for commands.
 
@@ -138,7 +141,7 @@ Use the training section in `docs/en/OPERATIONS.md` as the source of truth for c
 
 1. Verify Google LLM live call with `.env` or shell exports
 2. Regenerate LLM context with live calls
-3. Retrain `llm_context_seq_moe` and `deep_lstm_tcn_fusion` for h8/h45
+3. Run rolling backtests and calibration for `oil_context_fusion` 1D/1H h30
 4. Acquire and ingest CME settlement/curve CSV
 5. Run rolling backtest and quantile calibration
 6. Load longer news history

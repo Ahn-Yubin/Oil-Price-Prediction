@@ -1,6 +1,6 @@
 # 아키텍처
 
-이 프로젝트는 `backend`, `market_ai`, `frontend`, `scripts`를 분리해 oil-first forecasting dashboard를 범용 시장 예측 플랫폼으로 확장합니다.
+이 프로젝트는 `backend`, `market_ai`, `frontend`, `scripts`를 분리해 WTI 유가 예측 전용 dashboard와 단일 모델을 운영합니다.
 
 ## 책임 분리
 
@@ -45,7 +45,7 @@ LLM은 `market_ai.llm` 내부에서 context encoder로만 쓰입니다.
 news/events
 -> LocalEventContextEncoder 또는 OpenAICompatibleLLMEventEncoder
 -> event_context_daily.csv
--> llm_context_seq_moe x_event_context
+-> oil_context_fusion x_event_context
 ```
 
 LLM은 numeric forecast path를 생성하지 않습니다.

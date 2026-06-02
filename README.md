@@ -1,6 +1,6 @@
-# Universal Market Forecasting Dashboard
+# Oil Price Forecasting Dashboard
 
-이 프로젝트는 유가 dashboard에서 시작해 범용 시장 예측 플랫폼으로 확장 중인 FastAPI + market_ai + frontend 저장소입니다. 현재 첫 use case는 원유/에너지 시장이며, 목표는 가격 데이터, fundamental 데이터, 뉴스/LLM context, 딥러닝 예측, chart overlay를 하나의 운영 흐름으로 묶는 것입니다.
+이 프로젝트는 유가 예측 전용 FastAPI + market_ai + frontend 저장소입니다. 목표는 WTI 원유(`CL=F`) 차트, 에너지/거시 지표, 뉴스/LLM context, 단일 통합 딥러닝 예측 모델, chart overlay를 하나의 운영 흐름으로 묶는 것입니다.
 
 영어 문서는 [README.en.md](README.en.md)를 참고하십시오. 처음 보는 팀원은 [프로젝트 현황](docs/ko/PROJECT_STATUS.md)을 먼저 읽으십시오.
 
@@ -11,6 +11,7 @@
 - LLM은 context/event encoder입니다. 숫자 가격 예측기는 아닙니다.
 - Forecast target은 volatility-scaled cumulative log return distribution입니다.
 - 예측 가격은 `price_t+h = current_price * exp(predicted_cumulative_log_return_h)`로 복원합니다.
+- 사용자-facing 예측 모델은 `oil_context_fusion` 하나입니다.
 - `.pt`/`.npz` artifact는 `artifacts/models`, metadata JSON은 `artifacts/metadata`에 둡니다.
 - 한국어 문서와 영어 mirror는 같은 상대경로 구조를 유지합니다.
 
@@ -27,7 +28,7 @@
 - `GET /api/data-status?symbol=CL=F&interval=1d`
 - `GET /api/forecast?symbol=CL=F&interval=1d`
 - `GET /api/chart?symbol=CL=F&interval=1d`
-- `GET /api/market-context?symbol=NYMEX:CL1%21&interval=1d`
+- `GET /api/market-context?symbol=CL=F&interval=1d`
 - `GET /api/explanation`
 - `GET /api/backtests`
 
@@ -38,6 +39,7 @@
 - `data/processed/market_panel/{interval}/panel.csv`: `1d`, `1h`, `30m`, `15m` market panel
 - `data/processed/oil_fundamentals/eia_weekly.csv`: EIA weekly petroleum 데이터
 - `data/processed/oil_fundamentals/cftc_cot_weekly.csv`: CFTC COT weekly 포지셔닝 데이터
+- `data/processed/macro_panel/fred_daily_wide.csv`: 금리, 환율, 달러, VIX 등 FRED macro 데이터
 - `data/raw/news/public_market_news.csv`: 공개 뉴스 원문
 - `data/processed/event_context/event_context_daily.csv`: 뉴스/이벤트 context vector
 - `data/manifests/data_inventory.json`: 데이터 inventory
@@ -95,7 +97,7 @@ PY
 ## 데이터 구축
 
 ```bash
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1d --period 10y
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
 .venv/bin/python scripts/data/fetch_eia_petroleum.py
 .venv/bin/python scripts/data/fetch_cftc_cot.py
 .venv/bin/python scripts/data/build_event_context.py --news-path data/raw/news/public_market_news.csv --symbols CL=F,BZ=F,NG=F --mode local_rules
@@ -106,7 +108,7 @@ PY
 
 ```bash
 .venv/bin/python scripts/data/build_real_dataset.py \
-  --universe research_core \
+  --universe oil_core \
   --interval 1d \
   --period 10y \
   --news-timespan 3m \
@@ -115,28 +117,29 @@ PY
 
 ## 학습
 
-현재 processed data를 사용한 deep model 학습:
+현재 processed data를 사용한 단일 통합 유가 모델 학습:
 
 ```bash
 .venv/bin/python scripts/train/train_deep_fusion_models.py \
-  --model both \
+  --model oil_context_fusion \
   --interval 1d \
-  --horizon 8 \
+  --horizon 30 \
   --lookback 128 \
-  --universe research_core \
+  --universe oil_core \
   --use-processed-data \
   --market-panel data/processed/market_panel/1d/panel.csv \
   --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
   --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
+  --macro-panel data/processed/macro_panel/fred_daily_wide.csv \
   --event-context data/processed/event_context/event_context_daily.csv \
-  --max-samples 512 \
-  --epochs 3 \
+  --max-samples 0 \
+  --epochs 5 \
   --batch-size 64 \
   --device mps \
   --force
 ```
 
-`llm_context_seq_moe`는 `event_context_daily.csv`를 입력으로 사용합니다. `deep_lstm_tcn_fusion`은 같은 processed price/fundamental 데이터로 학습할 수 있습니다.
+`oil_context_fusion`은 기존 `deep_lstm_tcn_fusion`의 LSTM/TCN 가격 인코더와 `llm_context_seq_moe`의 context-gated expert 구조를 하나로 통합하고, attention/pattern/motif expert branch를 포함합니다. 가격 feature, 관련 에너지/거시 시장, EIA/CFTC fundamental, FRED macro, 뉴스/event context vector를 입력으로 사용합니다.
 
 ## 검증
 

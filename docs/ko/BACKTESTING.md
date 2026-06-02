@@ -4,14 +4,14 @@ Backtesting은 모델 출력의 point accuracy, quantile quality, horizon별 성
 
 ## 지원 모델
 
-기본 비교 대상은 `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive`, `flat`, `motif`, `pattern_mlp`, `deep_lstm_tcn_fusion`, `llm_context_seq_moe`입니다.
+기본 비교 대상은 단일 운영 모델 `oil_context_fusion`과 내부 benchmark인 `random_walk`, `drift`, `motif`, `pattern_mlp`입니다.
 
 `cycle`, `lstm`, `tcn`, `ensemble`은 removed/deprecated 모델이며 요청 시 명확한 error를 반환합니다.
 
 ## 실행
 
 ```bash
-.venv/bin/python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --include-regime-breakdown --no-plots
+.venv/bin/python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models oil_context_fusion,random_walk,drift,motif,pattern_mlp --include-regime-breakdown --no-plots
 ```
 
 ## 코드 위치

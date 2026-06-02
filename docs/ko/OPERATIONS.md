@@ -85,10 +85,10 @@ Live call:
 Market panel:
 
 ```bash
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1d --period 10y
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 1h --period 730d
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 30m --period 60d
-.venv/bin/python scripts/data/fetch_market_prices.py --universe research_core --interval 15m --period 60d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 1d --period 10y
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 1h --period 730d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 30m --period 60d
+.venv/bin/python scripts/data/fetch_market_prices.py --universe oil_core --interval 15m --period 60d
 ```
 
 Oil fundamentals and positioning:
@@ -117,43 +117,57 @@ Manifest:
 
 ## 학습
 
-현재 보유한 processed data를 사용한 1일봉 학습 예시:
+현재 보유한 processed data를 사용한 단일 유가 모델 1일봉 h30 학습 예시입니다. 운영 화면의 7/14/30 선택지는 이 h30 경로의 앞부분을 잘라 표시합니다.
 
 ```bash
 .venv/bin/python scripts/train/train_deep_fusion_models.py \
-  --model both \
+  --model oil_context_fusion \
   --interval 1d \
-  --horizon 8 \
+  --horizon 30 \
   --lookback 128 \
-  --universe research_core \
+  --universe oil_core \
+  --llm-context \
+  --event-context data/processed/event_context/event_context_daily.csv \
   --use-processed-data \
   --market-panel data/processed/market_panel/1d/panel.csv \
   --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
   --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
-  --event-context data/processed/event_context/event_context_daily.csv \
-  --max-samples 512 \
-  --epochs 3 \
+  --macro-panel data/processed/macro_panel/fred_daily_wide.csv \
+  --max-samples 0 \
+  --epochs 5 \
+  --patience 2 \
   --batch-size 64 \
   --device mps \
   --force
 ```
 
-Longer horizon artifact:
+Standalone Pattern MLP/Motif는 내부 benchmark/fallback용입니다. 사용자-facing 운영 모델은 `oil_context_fusion` 하나이며, 이 단일 artifact 내부에 pattern/motif expert branch가 포함됩니다.
+
+```bash
+.venv/bin/python scripts/train/train_pretrained_models.py \
+  --interval 1d \
+  --horizon 30 \
+  --market-panel data/processed/market_panel/1d/panel.csv \
+  --force
+```
+
+1H h30 artifact:
 
 ```bash
 .venv/bin/python scripts/train/train_deep_fusion_models.py \
-  --model both \
-  --interval 1d \
-  --horizon 45 \
-  --lookback 128 \
-  --universe research_core \
+  --model oil_context_fusion \
+  --interval 1h \
+  --horizon 30 \
+  --lookback 192 \
+  --universe oil_core \
   --use-processed-data \
-  --market-panel data/processed/market_panel/1d/panel.csv \
+  --market-panel data/processed/market_panel/1h/panel.csv \
   --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
   --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
+  --macro-panel data/processed/macro_panel/fred_daily_wide.csv \
   --event-context data/processed/event_context/event_context_daily.csv \
-  --max-samples 512 \
-  --epochs 3 \
+  --max-samples 0 \
+  --epochs 5 \
   --batch-size 64 \
   --device mps \
   --force
@@ -168,14 +182,14 @@ Production training은 `--synthetic`, `--quick-test`, `--allow-synthetic-fallbac
   --symbol CL=F \
   --interval 1d \
   --max-origins 10 \
-  --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe \
+  --models oil_context_fusion,random_walk,drift,motif,pattern_mlp \
   --no-plots
 ```
 
 Leaderboard와 calibration:
 
 ```bash
-.venv/bin/python scripts/evaluate/run_model_leaderboard.py --symbols CL=F,BZ=F,NG=F --interval 1d --max-origins 50
+.venv/bin/python scripts/evaluate/run_model_leaderboard.py --symbols CL=F --interval 1d --max-origins 50
 .venv/bin/python scripts/evaluate/calibrate_quantiles.py --model motif --symbol CL=F --interval 1d
 ```
 
@@ -190,7 +204,7 @@ Calibration artifact가 충분히 검증되기 전까지 forecast band는 residu
 예시:
 
 ```bash
-curl "http://127.0.0.1:8000/api/market-context?symbol=NYMEX:CL1%21&interval=1d&models=llm_context_seq_moe"
+curl "http://127.0.0.1:8000/api/market-context?symbol=CL=F&interval=1d&models=oil_context_fusion"
 ```
 
 ## 검증

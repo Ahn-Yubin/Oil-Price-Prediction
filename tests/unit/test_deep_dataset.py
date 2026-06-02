@@ -71,3 +71,52 @@ def test_deep_dataset_event_no_lookahead(tmp_path):
     contexts = pd.DataFrame([sample.x_event_context for sample in dataset.samples])
     assert contexts.iloc[-1, 0] >= 0
     assert contexts.iloc[-1, 7] >= 0
+
+
+def test_deep_dataset_aggregates_event_context_over_lookback_without_future_rows():
+    frame = synthetic_ohlcv(32, start="2020-01-01")
+    event_context = pd.DataFrame(
+        [
+            {
+                "date": "2020-01-22T00:00:00Z",
+                "symbol": "CL=F",
+                "directional_bias_score": 1.0,
+                "impact_score": 0.2,
+                "uncertainty": 0.1,
+                "time_decay": 0.3,
+                "event_count_1d": 1.0,
+            },
+            {
+                "date": "2020-01-25T00:00:00Z",
+                "symbol": "CL=F",
+                "directional_bias_score": -1.0,
+                "impact_score": 0.8,
+                "uncertainty": 0.4,
+                "time_decay": 0.9,
+                "event_count_1d": 2.0,
+            },
+            {
+                "date": "2030-01-01T00:00:00Z",
+                "symbol": "CL=F",
+                "directional_bias_score": 1.0,
+                "impact_score": 99.0,
+                "uncertainty": 0.0,
+                "time_decay": 1.0,
+                "event_count_1d": 99.0,
+            },
+        ]
+    )
+    config = DeepDatasetConfig(interval="1d", lookback=10, horizon=2, min_history=10, max_samples=1)
+    dataset = build_deep_dataset_from_frame(
+        symbol="CL=F",
+        interval="1d",
+        candles=frame,
+        config=config,
+        event_context_frame=event_context,
+    )
+
+    latest = dataset.samples[-1].x_event_context
+    assert np.isclose(latest[0], -0.6)
+    assert np.isclose(latest[2], 0.25)
+    assert np.isclose(latest[3], 0.9)
+    assert np.isclose(latest[4], 3.0)

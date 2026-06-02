@@ -41,14 +41,18 @@ from market_ai.modeling.deep.training import train_deep_model
 from market_ai.schemas.deep_learning import DeepDatasetConfig
 
 
-DEFAULT_HORIZON = {"1d": 45, "1h": 72, "30m": 120, "15m": 192}
+DEFAULT_HORIZON = {"1d": 30, "1h": 30, "30m": 30, "15m": 30}
 DEFAULT_LOOKBACK = {"1d": 128, "1h": 192, "30m": 240, "15m": 288}
 UNIVERSE_PATH = PROJECT_DIR / "configs" / "symbol_universe.yaml"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train artifact-based deep sequence forecast models")
-    parser.add_argument("--model", choices=["deep_lstm_tcn_fusion", "llm_context_seq_moe", "both"], default="both")
+    parser.add_argument(
+        "--model",
+        choices=["oil_context_fusion"],
+        default="oil_context_fusion",
+    )
     parser.add_argument("--interval", choices=["1d", "1h", "30m", "15m"], default="1d")
     parser.add_argument("--horizon", type=int, default=0)
     parser.add_argument("--lookback", type=int, default=0)
@@ -64,8 +68,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--oil-fundamentals", default="")
     parser.add_argument("--cot", default="")
     parser.add_argument("--cme-curve", default="")
+    parser.add_argument("--macro-panel", default="")
     parser.add_argument("--event-context", default="")
-    parser.add_argument("--max-samples", type=int, default=512)
+    parser.add_argument("--max-samples", type=int, default=512, help="Max samples per symbol. Use 0 for all available samples.")
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
@@ -255,6 +260,8 @@ def build_dataset(
 ):
     started = time.monotonic()
     event_paths = _event_paths_from_args(args)
+    if not config.event_context_enabled:
+        event_paths = []
     event_provider = _event_provider_from_args(args, config)
     source = "synthetic" if args.synthetic or args.quick_test else "processed" if getattr(args, "use_processed_data", False) else "yfinance"
     if progress_callback:
@@ -298,6 +305,7 @@ def build_dataset(
             oil_fundamentals=read_table(args.oil_fundamentals) if getattr(args, "oil_fundamentals", "") else None,
             cot=read_table(args.cot) if getattr(args, "cot", "") else None,
             cme_curve=read_table(args.cme_curve) if getattr(args, "cme_curve", "") else None,
+            macro=read_table(args.macro_panel) if getattr(args, "macro_panel", "") else None,
         )
         event_context_frame = read_table(args.event_context) if getattr(args, "event_context", "") else None
         samples = []
@@ -386,6 +394,7 @@ def build_dataset(
                 "oil_fundamentals": getattr(args, "oil_fundamentals", "") or None,
                 "cot": getattr(args, "cot", "") or None,
                 "cme_curve": getattr(args, "cme_curve", "") or None,
+                "macro_panel": getattr(args, "macro_panel", "") or None,
                 "event_context": getattr(args, "event_context", "") or None,
             },
         }
@@ -485,6 +494,7 @@ def build_dataset(
             "oil_fundamentals": None,
             "cot": None,
             "cme_curve": None,
+            "macro_panel": None,
             "event_context": None,
         },
     }
@@ -534,11 +544,17 @@ def train_one(
         status = "failed"
     metadata: dict[str, Any] = {
         "model_name": model_name,
+        "model_type": "deep_sequence",
+        "version": "oil_context_fusion_v2" if model_name == "oil_context_fusion" else "deep_v1",
         "artifact_file": artifact_path.name,
         "interval": args.interval,
         "horizon": config.horizon,
         "lookback": config.lookback,
         "target": "volatility_scaled_cumulative_log_return_distribution",
+        "optimization_metrics": ["sse", "mse", "rmse", "mae", "r2", "mape", "smape", "directional_accuracy"],
+        "expert_systems": ["lstm", "tcn", "attention", "context", "pattern", "motif"]
+        if model_name == "oil_context_fusion"
+        else None,
         "feature_set": dataset.feature_version,
         "asset_universe": config.symbols,
         "supported_intervals": [args.interval],
@@ -584,6 +600,8 @@ def train_one(
         "n_train": metadata["n_train"],
         "n_val": metadata["n_val"],
         "n_test": metadata["n_test"],
+        **{f"validation_{key}": value for key, value in result.validation_metrics.items()},
+        **{f"test_{key}": value for key, value in result.test_metrics.items()},
     }
     metadata["deep_config"] = result.model.config_dict()
     save_deep_artifact(result.model, artifact_path, model_name=model_name, metadata=metadata)
@@ -631,6 +649,7 @@ def main() -> None:
         lookback = min(lookback, 32)
         args.epochs = max(1, args.epochs)
         args.max_samples = min(args.max_samples or 128, 128)
+    max_samples = args.max_samples if args.max_samples and args.max_samples > 0 else None
     config = DeepDatasetConfig(
         interval=args.interval,
         lookback=lookback,
@@ -639,12 +658,12 @@ def main() -> None:
         related_assets_enabled=args.related_assets,
         llm_context_enabled=args.llm_context,
         event_context_enabled=args.llm_context,
-        max_samples=args.max_samples,
+        max_samples=max_samples,
         min_history=lookback,
         seed=args.seed,
     )
     dataset, data_report = build_dataset(args, symbols, config, progress_callback=progress_callback)
-    model_names = ["deep_lstm_tcn_fusion", "llm_context_seq_moe"] if args.model == "both" else [args.model]
+    model_names = [args.model]
     reports = [train_one(model_name, args, dataset, config, data_report, progress_callback=progress_callback) for model_name in model_names]
     print(json.dumps({"trained": model_names, "reports": reports}, ensure_ascii=False, indent=2))
 

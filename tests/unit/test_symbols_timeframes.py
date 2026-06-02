@@ -29,7 +29,9 @@ def test_btcusdt_maps_to_yfinance_crypto_pair():
 
 def test_timeframe_mapping_and_fallback():
     settings = Settings(default_interval="1d")
-    assert normalize_timeframe("15m", settings).provider_interval == "15m"
+    assert normalize_timeframe("15m", settings).normalized == "1d"
+    assert normalize_timeframe("15m", settings).warning is not None
+    assert normalize_timeframe("15m", settings, fallback_to_supported=False).provider_interval == "15m"
     assert normalize_timeframe("1h", settings).seconds == 3600
     unsupported = normalize_timeframe("2h", settings)
     assert unsupported.normalized == "1d"

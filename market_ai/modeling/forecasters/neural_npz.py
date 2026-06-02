@@ -784,6 +784,43 @@ def train_and_save_pretrained_model(
     return model
 
 
+def train_and_save_pretrained_model_from_series(
+    interval: str,
+    horizon: int,
+    *,
+    series: list[np.ndarray],
+    symbols: list[str],
+    force: bool = False,
+) -> dict:
+    cache_key = f"{interval}|{horizon}"
+    path = _model_path(interval, horizon)
+    if not force and path.exists():
+        loaded = _load_model(path)
+        if loaded is None:
+            raise RuntimeError(f"Failed to read model file: {path}")
+        _MODEL_CACHE[cache_key] = loaded
+        return loaded
+
+    if not series:
+        raise RuntimeError("No local series available to train pretrained model")
+
+    cfg = INTERVAL_CFG.get(interval, INTERVAL_CFG["1d"])
+    window = int(cfg["window"])
+    max_samples = int(cfg["max_samples"])
+    epochs = int(cfg["epochs"])
+    X, Y, y_scale, val_mask = _build_dataset(
+        series,
+        window=window,
+        horizon=horizon,
+        max_samples=max_samples,
+        interval=interval,
+    )
+    bundle = _train_mlp(X, Y, y_scale=y_scale, val_mask=val_mask, epochs=epochs)
+    model = _save_model(interval, horizon, bundle, window=window, symbols=symbols)
+    _MODEL_CACHE[cache_key] = model
+    return model
+
+
 def load_pretrained_model(interval: str, horizon: int) -> dict:
     cache_key = f"{interval}|{horizon}"
     if cache_key in _MODEL_CACHE:

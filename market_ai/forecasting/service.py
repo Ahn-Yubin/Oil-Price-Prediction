@@ -23,6 +23,7 @@ from market_ai.modeling.forecasters.neural_npz import PretrainedModelNotFoundErr
 from market_ai.modeling.forecasters.motif import forecast_model_comparison
 from market_ai.modeling.calibration.conformal import apply_calibration_to_points, load_calibration_artifact
 from market_ai.modeling.model_catalog import DEEP_MODELS, USER_FACING_MODELS, InvalidModelRequest, resolve_model_selection, split_model_query
+from market_ai.llm.live_context import build_live_event_context
 from market_ai.schemas.market import (
     DataStatusKind,
     ForecastPoint,
@@ -53,6 +54,14 @@ class ForecastBundle:
     metrics: dict[str, Any]
     model_info: dict[str, Any]
     horizon: int
+
+
+def _resolve_horizons(interval: str, requested_horizon: int | None) -> tuple[int, int]:
+    model_horizon = INTERVAL_TO_HORIZON.get(interval, INTERVAL_TO_HORIZON[FALLBACK_INTERVAL])
+    if requested_horizon is None or requested_horizon <= 0:
+        return model_horizon, model_horizon
+    display_horizon = max(1, min(int(requested_horizon), model_horizon))
+    return model_horizon, display_horizon
 
 
 def _finite_float(value: Any, default: float = 0.0) -> float:
@@ -257,11 +266,8 @@ def _deep_availability_by_model(settings: Settings, interval: str, horizon: int)
 
 
 def _default_models_for_artifacts(availabilities: dict[str, DeepArtifactAvailability]) -> tuple[str, ...]:
-    return tuple(
-        model_name
-        for model_name in USER_FACING_MODELS
-        if model_name not in DEEP_MODELS or availabilities[model_name].is_available
-    )
+    del availabilities
+    return USER_FACING_MODELS
 
 
 def _candle_frame_from_market(market: MarketDataWindow) -> pd.DataFrame:
@@ -284,6 +290,7 @@ def _deep_comparison_models(
     availabilities: dict[str, DeepArtifactAvailability],
     deep_model_info: dict[str, Any],
     explicit_request: bool,
+    event_context_frame: pd.DataFrame | None,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     frame = _candle_frame_from_market(market)
@@ -299,17 +306,18 @@ def _deep_comparison_models(
                 settings=settings,
                 symbol=market.symbol.provider_symbol,
                 candles=frame,
+                event_context_frame=event_context_frame if model_name in {"oil_context_fusion", "llm_context_seq_moe"} else None,
             )
         except DeepModelUnavailable as exc:
             availability = availabilities.get(model_name)
             artifact_status[model_name] = availability.status if availability is not None else "unavailable"
-            should_warn = explicit_request or (availability is not None and availability.is_available)
+            should_warn = explicit_request or model_name in USER_FACING_MODELS or (availability is not None and availability.is_available)
             if should_warn:
                 action = availability.training_command if availability is not None else None
                 expected = availability.expected_artifact_file if availability is not None else "expected deep artifact"
                 message = (
                     f"{model_name} artifact unavailable for {interval}/horizon {horizon}; "
-                    f"falling back to available non-deep models. Expected {expected}. Detail: {exc}"
+                    f"falling back to internal benchmark models. Expected {expected}. Detail: {exc}"
                 )
                 _add_warning(
                     warnings=warnings,
@@ -374,6 +382,39 @@ def _forecast_points_from_model(
     )
 
 
+def _band_explanation(
+    *,
+    primary_model: dict[str, Any],
+    model_info: dict[str, Any],
+    calibration_status: dict[str, Any],
+    interval: str,
+    horizon: int,
+) -> dict[str, Any]:
+    status = str(calibration_status.get("calibration_status") or "uncalibrated")
+    display_status = "calibrated" if status == "calibrated" else "volatility_estimated"
+    return {
+        "status": display_status,
+        "source": "conformal_calibration" if display_status == "calibrated" else "model_quantiles_and_recent_volatility",
+        "primary_model": str(primary_model.get("id") or "unknown"),
+        "interval": interval,
+        "horizon": horizon,
+        "band_scale": model_info.get("band_scale"),
+        "recent_step_vol": model_info.get("recent_step_vol"),
+        "n_origins": calibration_status.get("n_origins"),
+        "coverage_80": calibration_status.get("coverage_80"),
+        "coverage_status": calibration_status.get("coverage_status") or ("measured" if display_status == "calibrated" else "not_measured"),
+        "raw_calibration_status": calibration_status.get("raw_calibration_status"),
+        "method": (
+            "Rolling backtest conformal adjustment widens or narrows the selected model quantile path."
+            if display_status == "calibrated"
+            else (
+                "The selected model supplies a median path and quantile/residual scale; the service combines that "
+                "with recent realized volatility so every supported symbol still receives P10-P90 and P05-P95 bands."
+            )
+        ),
+    }
+
+
 def build_forecast(
     *,
     symbol: str,
@@ -384,18 +425,21 @@ def build_forecast(
     include_scenarios: bool = True,
     allow_removed_models_as_warning: bool = False,
     settings: Settings | None = None,
+    market_override: MarketDataWindow | None = None,
 ) -> ForecastBundle:
     del include_explanation
     settings = settings or get_settings()
+    requested_symbol_input = symbol or settings.default_symbol
+    forecast_symbol = settings.default_symbol or "CL=F"
+    oil_symbol_forced = str(requested_symbol_input or "").strip() != str(forecast_symbol).strip()
     requested_models = split_model_query(models)
     try:
-        market = load_market_data_window(symbol, interval, settings=settings)
+        market = market_override or load_market_data_window(forecast_symbol, interval, settings=settings)
     except MarketDataUnavailable:
         raise
 
     resolved_interval = market.timeframe.normalized
-    model_horizon = INTERVAL_TO_HORIZON.get(resolved_interval, INTERVAL_TO_HORIZON[FALLBACK_INTERVAL])
-    output_horizon = model_horizon if horizon is None or horizon <= 0 else min(int(horizon), model_horizon)
+    model_horizon, output_horizon = _resolve_horizons(resolved_interval, horizon)
     deep_availabilities = _deep_availability_by_model(settings, resolved_interval, model_horizon)
     default_models = _default_models_for_artifacts(deep_availabilities)
     selection = resolve_model_selection(
@@ -408,6 +452,18 @@ def build_forecast(
     if len(close) == 0:
         raise ForecastUnavailable("Forecast requires at least one close price.")
 
+    warnings: list[str] = []
+    warning_objects: list[ForecastWarning] = []
+    if oil_symbol_forced:
+        _add_warning(
+            warnings=warnings,
+            warning_objects=warning_objects,
+            code="oil_symbol_forced",
+            severity="info",
+            message=f"Oil-only mode is enabled; requested symbol {requested_symbol_input} was mapped to {forecast_symbol}.",
+        )
+    pretrained_missing_message: str | None = None
+    pretrained_missing_action: str | None = None
     try:
         comparison_models, model_info = forecast_model_comparison(
             close=close,
@@ -417,15 +473,31 @@ def build_forecast(
             return_clip=INTERVAL_TO_RETURN_CLIP.get(resolved_interval, 0.05),
             max_log_band=INTERVAL_TO_MAX_LOG_BAND.get(resolved_interval, 0.25),
         )
-    except PretrainedModelNotFoundError:
-        raise
+    except PretrainedModelNotFoundError as exc:
+        comparison_models = []
+        fallback_band = min(INTERVAL_TO_MAX_LOG_BAND.get(resolved_interval, 0.1), 0.02)
+        model_info = {
+            "model_name": "Deep/baseline only forecast",
+            "band_calibration": "fallback_recent_volatility",
+            "_ci_band_values": np.full(model_horizon, fallback_band, dtype=np.float64),
+        }
+        pretrained_missing_message = (
+            f"Pattern/Motif pretrained artifact is unavailable for {resolved_interval}/horizon {model_horizon}; "
+            "serving available deep and baseline models only."
+        )
+        pretrained_missing_action = str(exc)
     except Exception as exc:
         raise ForecastUnavailable(str(exc)) from exc
 
-    if not comparison_models:
-        raise ForecastUnavailable("No forecast model output was produced.")
-    warnings: list[str] = []
-    warning_objects: list[ForecastWarning] = []
+    if pretrained_missing_message:
+        _add_warning(
+            warnings=warnings,
+            warning_objects=warning_objects,
+            code="pretrained_pattern_artifact_unavailable",
+            severity="warning",
+            message=pretrained_missing_message,
+            action=pretrained_missing_action,
+        )
     for message in selection.warnings:
         _add_warning(
             warnings=warnings,
@@ -438,6 +510,25 @@ def build_forecast(
         model_name: availability.status for model_name, availability in deep_availabilities.items()
     }
     deep_model_info: dict[str, Any] = {}
+    live_context: dict[str, Any] | None = None
+    live_event_context_frame: pd.DataFrame | None = None
+    if any(model_name in {"oil_context_fusion", "llm_context_seq_moe"} for model_name in selection.selected):
+        try:
+            live_context = build_live_event_context(
+                symbol=market.symbol.provider_symbol,
+                settings=settings,
+                as_of_time=datetime.fromtimestamp(market.candles[-1].time, tz=timezone.utc),
+            )
+            live_event_context_frame = live_context.get("context_frame")
+        except Exception as exc:
+            _add_warning(
+                warnings=warnings,
+                warning_objects=warning_objects,
+                code="live_event_context_unavailable",
+                severity="warning",
+                message=f"Live news event context unavailable; oil_context_fusion will use cached or file context if available. Detail: {exc}",
+                action="Check public news connectivity and LLM context settings.",
+            )
     explicit_deep_request = bool(requested_models) and any(model_name in DEEP_MODELS for model_name in selection.selected)
     comparison_models = (
         _deep_comparison_models(
@@ -453,6 +544,7 @@ def build_forecast(
             availabilities=deep_availabilities,
             deep_model_info=deep_model_info,
             explicit_request=explicit_deep_request,
+            event_context_frame=live_event_context_frame,
         )
         + comparison_models
         + _baseline_comparison_models(close, resolved_interval, model_horizon)
@@ -468,7 +560,7 @@ def build_forecast(
         raise ForecastUnavailable("No selected forecast model output was available.")
 
     primary_priority = (
-        ["deep_lstm_tcn_fusion", "motif", "pattern_mlp", "random_walk"]
+        ["oil_context_fusion", "motif", "pattern_mlp", "random_walk"]
         if not selection.requested
         else selection.selected
     )
@@ -522,14 +614,31 @@ def build_forecast(
         }
     )
     if calibration_artifact is None or calibration_artifact.calibration_status != "calibrated":
+        raw_status = str(calibration_status.get("calibration_status") or "uncalibrated")
+        calibration_status = {
+            **calibration_status,
+            "calibration_status": "volatility_estimated",
+            "coverage_status": "not_measured" if calibration_artifact is None else "insufficient_origins",
+            "raw_calibration_status": raw_status,
+        }
         _add_warning(
             warnings=warnings,
             warning_objects=warning_objects,
-            code="quantile_bands_uncalibrated",
+            code="quantile_bands_volatility_estimated",
             severity="info",
-            message="Quantile bands are residual-volatility adapters and are not validated coverage intervals yet.",
+            message=(
+                "Forecast bands are built from the selected model quantile/residual scale and recent realized "
+                "volatility for this model/symbol/interval; measured coverage calibration is not available yet."
+            ),
             action="Run rolling coverage calibration before labeling bands as validated confidence intervals.",
         )
+    band_explanation = _band_explanation(
+        primary_model=primary,
+        model_info=model_info,
+        calibration_status=calibration_status,
+        interval=resolved_interval,
+        horizon=output_horizon,
+    )
     status_value = str(market.data_status.status)
     if status_value in {DataStatusKind.mock.value, DataStatusKind.fallback.value, DataStatusKind.stale.value}:
         _add_warning(
@@ -601,11 +710,17 @@ def build_forecast(
             "enabled": settings.enable_llm_context,
             "external_calls_enabled": settings.enable_external_llm_calls,
             "role": "context/event encoder only",
+            "event_context_source": live_context.get("source") if live_context else "processed_or_file",
+            "live_news_count": int(len(live_context.get("news"))) if live_context is not None and live_context.get("news") is not None else 0,
+            "event_count": int((live_context.get("context_points") or [{}])[0].get("event_count", 0)) if live_context else 0,
+            "overall_bias": (live_context.get("context_points") or [{}])[0].get("overall_bias") if live_context else None,
+            "impact_score": (live_context.get("context_points") or [{}])[0].get("impact_score") if live_context else None,
         },
         deep_model_info=deep_model_info,
         feature_version=model_info.get("feature_version") or model_info.get("feature_set"),
         artifact_status=artifact_status,
         calibration_status=calibration_status,
+        band_explanation=band_explanation,
     )
     return ForecastBundle(
         response=response,
@@ -655,10 +770,11 @@ def chart_payload_from_forecast(bundle: ForecastBundle) -> dict[str, Any]:
         "feature_version": response.feature_version,
         "artifact_status": response.artifact_status,
         "calibration_status": response.calibration_status,
+        "band_explanation": response.band_explanation,
         "confidence_level": None,
         "band_label": "calibrated conformal quantile band"
         if response.calibration_status.get("calibration_status") == "calibrated"
-        else "uncalibrated residual-volatility quantile adapter",
+        else "volatility-estimated quantile band",
         "model_trained_at": bundle.model_info.get("trained_at"),
         "model_train_symbols": bundle.model_info.get("train_symbols"),
         "model_sample_info": {

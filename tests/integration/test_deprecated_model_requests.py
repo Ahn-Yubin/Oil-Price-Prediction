@@ -9,4 +9,4 @@ def test_removed_model_request_returns_400():
     assert response.status_code == 400
     body = response.json()["detail"]
     assert body["removed_models"] == ["lstm"]
-    assert "deep_lstm_tcn_fusion" in body["replacement_models"]["lstm"]
+    assert "oil_context_fusion" in body["replacement_models"]["lstm"]

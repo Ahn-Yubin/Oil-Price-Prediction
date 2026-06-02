@@ -4,14 +4,14 @@ Backtesting verifies point accuracy, quantile quality, horizon-specific performa
 
 ## Supported Models
 
-The default comparison set is `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive`, `flat`, `motif`, `pattern_mlp`, `deep_lstm_tcn_fusion`, and `llm_context_seq_moe`.
+The default comparison set is the single operational model `oil_context_fusion` plus internal benchmarks `random_walk`, `drift`, `motif`, and `pattern_mlp`.
 
 `cycle`, `lstm`, `tcn`, and `ensemble` are removed/deprecated models; explicit requests return a clear error.
 
 ## Run
 
 ```bash
-.venv/bin/python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models random_walk,drift,motif,pattern_mlp,deep_lstm_tcn_fusion,llm_context_seq_moe --include-regime-breakdown --no-plots
+.venv/bin/python scripts/backtest/run_backtest.py --symbol CL=F --interval 1d --max-origins 10 --models oil_context_fusion,random_walk,drift,motif,pattern_mlp --include-regime-breakdown --no-plots
 ```
 
 ## Code Location

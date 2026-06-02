@@ -29,7 +29,7 @@ def _path_from_env(value: str | None, default: Path) -> Path:
 
 class Settings(BaseModel):
     app_env: str = Field(default="development")
-    default_symbol: str = Field(default="NYMEX:CL1!")
+    default_symbol: str = Field(default="CL=F")
     default_interval: str = Field(default="1d")
     model_dir: Path = Field(default_factory=lambda: PROJECT_DIR / "artifacts" / "models")
     metadata_dir: Path = Field(default_factory=lambda: PROJECT_DIR / "artifacts" / "metadata")
@@ -77,7 +77,7 @@ class Settings(BaseModel):
         data_dir = _path_from_env(source.get("DATA_DIR"), PROJECT_DIR / "data")
         return cls(
             app_env=source.get("APP_ENV", "development"),
-            default_symbol=source.get("DEFAULT_SYMBOL", "NYMEX:CL1!"),
+            default_symbol=source.get("DEFAULT_SYMBOL", "CL=F"),
             default_interval=source.get("DEFAULT_INTERVAL", "1d"),
             model_dir=_path_from_env(source.get("MODEL_DIR"), PROJECT_DIR / "artifacts" / "models"),
             metadata_dir=_path_from_env(source.get("METADATA_DIR"), PROJECT_DIR / "artifacts" / "metadata"),

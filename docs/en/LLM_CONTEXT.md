@@ -11,19 +11,52 @@ news/event text
 -> LLM or local_rules encoder
 -> bias, impact, uncertainty, event count, explanation, event embedding
 -> data/processed/event_context/event_context_daily.csv
--> x_event_context input for llm_context_seq_moe
+-> x_event_context input for oil_context_fusion
 -> time-series model predicts volatility-scaled cumulative log return distribution
 -> prices are reconstructed with current_price * exp(predicted_cumulative_log_return_h)
 ```
 
 So the user-facing summary is correct: news is read by the LLM, converted into scores/context, and used as one model input. Those scores are point-in-time context features, not investment advice or numeric price targets.
 
+Training samples do not use only the origin date. With the current `lookback=128` setup, each origin aggregates event context from the prior 128-day window into `x_event_context [13]`. Event-count fields are summed, while directional/impact/quality fields are impact-score weighted averages.
+
+## Live Dashboard Pipeline
+
+When the dashboard opens a symbol or the interval/horizon changes, it runs the following sequence.
+
+1. The frontend first calls `/api/models?interval={interval}&horizon={horizon}`.
+   This response tells the UI which models are executable for the current combination. Deep models without artifacts are disabled in the visual toggles and are not sent to forecast requests.
+
+2. The frontend calls `/api/forecast`.
+   The requested models are all currently available models for that interval/horizon. Clicking a model chip does not recalculate data; it only shows or hides already returned `model_paths`.
+
+3. The backend loads OHLCV candles from yfinance or processed providers.
+   The UI and API examples use yfinance provider symbols by default. For example, crude oil is `CL=F`, Brent is `BZ=F`, and USD/KRW is `USDKRW=X`. Legacy TradingView aliases such as `NYMEX:CL1!` are still normalized for backward compatibility only.
+
+4. The backend computes numeric forecasts from time-series models.
+   `motif`, `pattern_mlp`, baselines, and deep models produce cumulative log-return or price paths. Forecast prices are restored with `current_price * exp(predicted_cumulative_log_return_h)`. The LLM does not create numeric prices in this step.
+
+5. When the single operational model `oil_context_fusion` is selected, the backend calls `build_live_event_context()`.
+   This function fetches recent public news from Google News RSS and Yahoo Finance RSS, then applies symbol-aware query and relevance filtering. Current live dashboard context requests ask for up to 60 rows, while chat asks for up to 24 rows.
+
+6. The news DataFrame is converted into `RawNewsItem` objects and passed to the encoder.
+   If external LLM calls are enabled and the rate guard allows the call, the LLM encoder is used. Otherwise `local_rules` produces the same schema deterministically. The output schema is `overall_bias`, `impact_score`, `uncertainty`, `event_count`, `explanation`, and `event_embedding[13]`.
+
+7. The encoder output becomes a one-row `context_frame` for deep-model inference.
+   `oil_context_fusion` uses this `x_event_context` for context expert gating, uncertainty, and confidence. The LLM does not draw the forecast line directly; the news context vector becomes an input feature and the time-series model computes the forecast path.
+
+8. `/api/market-context?live=1` returns the same live context payload to the UI.
+   Chart news markers, popovers, and the right-side “News & Scenario Context” panel use the same `news` and `context_points`. Each visible news row shows the current context point’s input factors: bias, impact, uncertainty, and event count.
+
+9. `/api/model-commentary` and `/api/assistant-chat` explain already-computed model paths and news context.
+   They do not create new numeric price forecasts. To avoid rate-limit spikes, the server enforces an external LLM call guard over a 60-second window and uses commentary/context caches. If the guard blocks a call, deterministic explanation is returned with a warning.
+
 ## Allowed Roles
 
 - Convert news, economic events, and supply events into structured market context.
 - Produce `overall_bias`, `impact_score`, `uncertainty`, and event embeddings.
 - Show historical news and the context interpretation on the dashboard.
-- Affect gating, confidence, and uncertainty indirectly inside `llm_context_seq_moe`.
+- Affect gating, confidence, and uncertainty indirectly inside `oil_context_fusion`.
 - Provide historical context markers and scenario commentary through `/api/market-context`.
 
 ## Forbidden Roles
@@ -136,23 +169,27 @@ Outputs:
 
 ## Training
 
-`llm_context_seq_moe` is the model that consumes LLM context.
+`oil_context_fusion` is the operational model that consumes LLM context.
 
 ```bash
 .venv/bin/python scripts/train/train_deep_fusion_models.py \
-  --model llm_context_seq_moe \
+  --model oil_context_fusion \
   --interval 1d \
-  --horizon 8 \
+  --horizon 30 \
   --lookback 128 \
-  --universe research_core \
+  --universe oil_core \
+  --llm-context \
+  --event-context data/processed/event_context/event_context_daily.csv \
+  --events-path data/raw/news/public_market_news.csv \
   --use-processed-data \
   --market-panel data/processed/market_panel/1d/panel.csv \
   --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
   --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
-  --event-context data/processed/event_context/event_context_daily.csv \
-  --max-samples 512 \
-  --epochs 3 \
-  --batch-size 64 \
+  --macro-panel data/processed/macro_panel/fred_daily_wide.csv \
+  --max-samples 0 \
+  --epochs 10 \
+  --patience 3 \
+  --batch-size 128 \
   --device mps \
   --force
 ```

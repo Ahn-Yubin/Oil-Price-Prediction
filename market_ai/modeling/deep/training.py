@@ -12,6 +12,7 @@ from market_ai.data.deep_dataset import DeepDataset
 from market_ai.modeling.deep.losses import deep_forecast_loss
 from market_ai.modeling.deep.lstm_tcn_fusion import DeepLstmTcnFusion
 from market_ai.modeling.deep.llm_seq_moe import LLMContextSeqMoE
+from market_ai.modeling.deep.oil_context_fusion import OilContextFusion
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,8 @@ class TrainingResult:
     train_loss: float
     validation_loss: float | None
     epochs_ran: int
+    validation_metrics: dict[str, float]
+    test_metrics: dict[str, float]
 
 
 def _make_model(model_name: str, dataset: DeepDataset, *, hidden_dim: int = 48, dropout: float = 0.1) -> torch.nn.Module:
@@ -33,6 +36,8 @@ def _make_model(model_name: str, dataset: DeepDataset, *, hidden_dim: int = 48, 
         "hidden_dim": hidden_dim,
         "dropout": dropout,
     }
+    if model_name == "oil_context_fusion":
+        return OilContextFusion(**{**kwargs, "hidden_dim": max(hidden_dim, 72), "dropout": max(dropout, 0.12)})
     if model_name == "deep_lstm_tcn_fusion":
         return DeepLstmTcnFusion(**kwargs)
     if model_name == "llm_context_seq_moe":
@@ -65,6 +70,95 @@ def _eval_loss(model: torch.nn.Module, loader: DataLoader, device: torch.device)
             out = model(xb, xc, xe, xs)
             losses.append(float(deep_forecast_loss(out, y_vol_scaled_cum_return=y, y_direction=yd, y_future_volatility=yv).item()))
     return float(np.mean(losses))
+
+
+def _point_metrics(
+    *,
+    pred_price: np.ndarray,
+    actual_price: np.ndarray,
+    true_log_path: np.ndarray,
+    pred_log_path: np.ndarray,
+) -> dict[str, float]:
+    pred_price = np.asarray(pred_price, dtype=np.float64).reshape(-1)
+    actual_price = np.asarray(actual_price, dtype=np.float64).reshape(-1)
+    true_log_path = np.asarray(true_log_path, dtype=np.float64).reshape(-1)
+    pred_log_path = np.asarray(pred_log_path, dtype=np.float64).reshape(-1)
+    mask = np.isfinite(pred_price) & np.isfinite(actual_price) & (actual_price > 0.0)
+    if not np.any(mask):
+        return {
+            "sse": float("nan"),
+            "mse": float("nan"),
+            "rmse": float("nan"),
+            "mae": float("nan"),
+            "r2": float("nan"),
+            "mape": float("nan"),
+            "smape": float("nan"),
+            "directional_accuracy": float("nan"),
+        }
+    pred = pred_price[mask]
+    actual = actual_price[mask]
+    errors = pred - actual
+    abs_errors = np.abs(errors)
+    sse = float(np.sum(errors**2))
+    mse = float(np.mean(errors**2))
+    actual_mean = float(np.mean(actual))
+    denom = float(np.sum((actual - actual_mean) ** 2))
+    smape_denom = np.maximum((np.abs(pred) + np.abs(actual)) / 2.0, 1e-8)
+    log_mask = np.isfinite(pred_log_path) & np.isfinite(true_log_path)
+    if np.any(log_mask):
+        direction = float(np.mean(np.sign(pred_log_path[log_mask]) == np.sign(true_log_path[log_mask])))
+    else:
+        direction = float("nan")
+    return {
+        "sse": sse,
+        "mse": mse,
+        "rmse": float(np.sqrt(mse)),
+        "mae": float(np.mean(abs_errors)),
+        "r2": float(1.0 - sse / denom) if denom > 1e-12 else float("nan"),
+        "mape": float(np.mean(abs_errors / np.maximum(np.abs(actual), 1e-8)) * 100.0),
+        "smape": float(np.mean(abs_errors / smape_denom) * 100.0),
+        "directional_accuracy": direction,
+    }
+
+
+def _eval_point_metrics(
+    model: torch.nn.Module,
+    dataset: DeepDataset,
+    indices: np.ndarray,
+    *,
+    batch_size: int,
+    device: torch.device,
+) -> dict[str, float]:
+    if len(indices) == 0:
+        return {}
+    loader = _loader(dataset, indices, batch_size, shuffle=False)
+    medians: list[np.ndarray] = []
+    model.eval()
+    with torch.no_grad():
+        for xb, xc, xe, xs, _y, _yd, _yv in loader:
+            out = model(
+                xb.to(device),
+                xc.to(device),
+                xe.to(device),
+                xs.to(device),
+            )
+            median = out["quantiles"][..., 3]
+            medians.append(median.detach().cpu().numpy())
+    pred_scaled = np.concatenate(medians, axis=0)
+    selected = [dataset.samples[int(idx)] for idx in indices]
+    target_scaled = np.asarray([sample.y_vol_scaled_cum_return for sample in selected], dtype=np.float64)
+    recent_vol = np.asarray([sample.recent_realized_volatility for sample in selected], dtype=np.float64)[:, None]
+    current_price = np.asarray([sample.current_price for sample in selected], dtype=np.float64)[:, None]
+    pred_log_path = np.clip(pred_scaled.astype(np.float64) * recent_vol, -1.5, 1.5)
+    true_log_path = np.clip(target_scaled * recent_vol, -1.5, 1.5)
+    pred_price = current_price * np.exp(pred_log_path)
+    actual_price = current_price * np.exp(true_log_path)
+    return _point_metrics(
+        pred_price=pred_price,
+        actual_price=actual_price,
+        true_log_path=true_log_path,
+        pred_log_path=pred_log_path,
+    )
 
 
 def train_deep_model(
@@ -192,6 +286,20 @@ def train_deep_model(
                     )
                 break
     model.load_state_dict(best_state)
+    validation_metrics = _eval_point_metrics(
+        model,
+        dataset,
+        val_indices,
+        batch_size=batch_size,
+        device=resolved_device,
+    )
+    test_metrics = _eval_point_metrics(
+        model,
+        dataset,
+        dataset.test_indices,
+        batch_size=batch_size,
+        device=resolved_device,
+    )
     if progress_callback:
         progress_callback(
             {
@@ -200,7 +308,16 @@ def train_deep_model(
                 "epochs_ran": epochs_ran,
                 "train_loss": last_train,
                 "validation_loss": best_val,
+                "validation_rmse": validation_metrics.get("rmse"),
+                "validation_mae": validation_metrics.get("mae"),
                 "elapsed_seconds": time.monotonic() - started,
             }
         )
-    return TrainingResult(model=model.cpu(), train_loss=last_train, validation_loss=best_val, epochs_ran=epochs_ran)
+    return TrainingResult(
+        model=model.cpu(),
+        train_loss=last_train,
+        validation_loss=best_val,
+        epochs_ran=epochs_ran,
+        validation_metrics=validation_metrics,
+        test_metrics=test_metrics,
+    )

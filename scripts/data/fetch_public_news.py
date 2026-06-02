@@ -38,8 +38,8 @@ TOPIC_SYMBOLS = {
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fetch public market news from Yahoo RSS and GDELT DOC API.")
-    parser.add_argument("--universe", default="research_core")
+    parser = argparse.ArgumentParser(description="Fetch public oil-market news from Yahoo RSS and GDELT DOC API.")
+    parser.add_argument("--universe", default="oil_core")
     parser.add_argument("--symbols", default="", help="Comma-separated symbol override.")
     parser.add_argument("--output", default=str(DATA_ROOT / "raw" / "news" / "public_market_news.csv"))
     parser.add_argument("--status-output", default=str(DATA_ROOT / "interim" / "events" / "public_news_fetch_status.csv"))

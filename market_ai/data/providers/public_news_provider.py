@@ -56,7 +56,14 @@ def _parse_time(value: str | None) -> pd.Timestamp | None:
     return pd.Timestamp(parsed).tz_convert("UTC")
 
 
-def _read_url(url: str, *, retries: int = 3, backoff_seconds: float = 5.0, sleep_seconds: float = 0.0) -> bytes:
+def _read_url(
+    url: str,
+    *,
+    retries: int = 1,
+    backoff_seconds: float = 2.0,
+    sleep_seconds: float = 0.0,
+    timeout_seconds: float = 8.0,
+) -> bytes:
     if sleep_seconds > 0:
         time.sleep(sleep_seconds)
     last_error: Exception | None = None
@@ -64,7 +71,7 @@ def _read_url(url: str, *, retries: int = 3, backoff_seconds: float = 5.0, sleep
         response = requests.get(
             url,
             headers={"User-Agent": "market-ai-data-collector/1.0"},
-            timeout=30,
+            timeout=timeout_seconds,
             verify=_requests_verify(),
         )
         if response.status_code != 429:

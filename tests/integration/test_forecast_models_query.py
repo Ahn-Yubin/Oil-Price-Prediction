@@ -6,6 +6,7 @@ import numpy as np
 from market_ai.forecasting import service
 from market_ai.modeling.deep.availability import DeepArtifactAvailability
 from market_ai.modeling.forecasters.deep_fusion import DeepModelUnavailable
+from market_ai.modeling.forecasters.neural_npz import PretrainedModelNotFoundError
 from market_ai.modeling.model_catalog import DEEP_MODELS
 from market_ai.schemas.market import AssetClass, Candle, DataStatus, MarketDataWindow, MarketSymbol, Timeframe
 
@@ -63,13 +64,42 @@ def _missing_deep_availability(settings, interval, horizon):
     }
 
 
+def _available_deep_availability(settings, interval, horizon):
+    availability = _missing_deep_availability(settings, interval, horizon)
+    return {
+        name: item.__class__(
+            **{
+                **item.__dict__,
+                "status": "available",
+                "reason": None,
+            }
+        )
+        for name, item in availability.items()
+    }
+
+
+def _oil_model(**kwargs):
+    horizon = int(kwargs["horizon"])
+    base = float(kwargs["close"][-1])
+    values = base * np.exp(np.linspace(0.0, 0.01, horizon))
+    return {
+        "id": "oil_context_fusion",
+        "label": "Oil Context Fusion",
+        "description": "test",
+        "color": "#fff",
+        "values": values,
+    }
+
+
 def test_forecast_models_query_selects_requested_model(monkeypatch):
     monkeypatch.setattr(service, "load_market_data_window", lambda *args, **kwargs: _market_window())
     monkeypatch.setattr(service, "forecast_model_comparison", _comparison)
-    bundle = service.build_forecast(symbol="CL=F", interval="1d", models="random_walk", include_scenarios=False)
-    assert bundle.response.selected_models == ["random_walk"]
-    assert bundle.response.primary_model == "random_walk"
-    assert [model["id"] for model in bundle.forecast_models] == ["random_walk"]
+    monkeypatch.setattr(service, "_deep_availability_by_model", _available_deep_availability)
+    monkeypatch.setattr(service, "forecast_with_deep_model", _oil_model)
+    bundle = service.build_forecast(symbol="CL=F", interval="1d", models="oil_context_fusion", include_scenarios=False)
+    assert bundle.response.selected_models == ["oil_context_fusion"]
+    assert bundle.response.primary_model == "oil_context_fusion"
+    assert [model["id"] for model in bundle.forecast_models] == ["oil_context_fusion"]
 
 
 def test_forecast_deep_request_falls_back_when_artifact_missing(monkeypatch):
@@ -81,20 +111,36 @@ def test_forecast_deep_request_falls_back_when_artifact_missing(monkeypatch):
         "forecast_with_deep_model",
         lambda **kwargs: (_ for _ in ()).throw(DeepModelUnavailable("missing test artifact")),
     )
-    bundle = service.build_forecast(symbol="CL=F", interval="1d", models="deep_lstm_tcn_fusion", include_scenarios=False)
-    assert "deep_lstm_tcn_fusion" in bundle.response.selected_models
-    assert bundle.response.artifact_status["deep_lstm_tcn_fusion"] == "artifact_missing"
+    bundle = service.build_forecast(symbol="CL=F", interval="1d", models="oil_context_fusion", include_scenarios=False)
+    assert "oil_context_fusion" in bundle.response.selected_models
+    assert bundle.response.artifact_status["oil_context_fusion"] == "artifact_missing"
     assert bundle.response.primary_model == "motif"
     assert any(item.code == "deep_artifact_unavailable" for item in bundle.response.warning_objects)
 
 
-def test_forecast_default_skips_missing_deep_artifacts_without_warning(monkeypatch):
+def test_forecast_default_uses_unified_oil_model_and_warns_when_missing(monkeypatch):
     monkeypatch.setattr(service, "load_market_data_window", lambda *args, **kwargs: _market_window())
     monkeypatch.setattr(service, "forecast_model_comparison", _comparison)
     monkeypatch.setattr(service, "_deep_availability_by_model", _missing_deep_availability)
     bundle = service.build_forecast(symbol="CL=F", interval="1d", include_scenarios=False)
-    assert "deep_lstm_tcn_fusion" not in bundle.response.selected_models
-    assert "llm_context_seq_moe" not in bundle.response.selected_models
-    assert bundle.response.artifact_status["deep_lstm_tcn_fusion"] == "artifact_missing"
-    assert not any(item.code == "deep_artifact_unavailable" for item in bundle.response.warning_objects)
-    assert any(item.code == "quantile_bands_uncalibrated" and item.severity == "info" for item in bundle.response.warning_objects)
+    assert bundle.response.selected_models == ["oil_context_fusion"]
+    assert bundle.response.artifact_status["oil_context_fusion"] == "artifact_missing"
+    assert any(item.code == "deep_artifact_unavailable" for item in bundle.response.warning_objects)
+    assert bundle.response.calibration_status["calibration_status"] == "calibrated"
+    assert not any(item.code == "quantile_bands_uncalibrated" for item in bundle.response.warning_objects)
+
+
+def test_forecast_serves_baseline_when_pattern_artifact_for_horizon_is_missing(monkeypatch):
+    monkeypatch.setattr(service, "load_market_data_window", lambda *args, **kwargs: _market_window())
+    monkeypatch.setattr(service, "_deep_availability_by_model", _missing_deep_availability)
+
+    def missing_pattern(*args, **kwargs):
+        raise PretrainedModelNotFoundError("missing h8 artifact")
+
+    monkeypatch.setattr(service, "forecast_model_comparison", missing_pattern)
+    bundle = service.build_forecast(symbol="CL=F", interval="1d", horizon=8, include_scenarios=False)
+
+    assert bundle.horizon == 8
+    assert bundle.response.primary_model == "random_walk"
+    assert [model["id"] for model in bundle.forecast_models] == ["random_walk"]
+    assert any(item.code == "pretrained_pattern_artifact_unavailable" for item in bundle.response.warning_objects)

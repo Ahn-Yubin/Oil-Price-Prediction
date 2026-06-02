@@ -4,14 +4,7 @@ from dataclasses import dataclass
 
 
 USER_FACING_MODELS: tuple[str, ...] = (
-    "motif",
-    "pattern_mlp",
-    "deep_lstm_tcn_fusion",
-    "llm_context_seq_moe",
-    "random_walk",
-    "drift",
-    "seasonal_naive",
-    "volatility_scaled_naive",
+    "oil_context_fusion",
 )
 
 BACKTEST_ONLY_MODELS: tuple[str, ...] = (
@@ -22,19 +15,28 @@ BACKTEST_ONLY_MODELS: tuple[str, ...] = (
 
 REMOVED_LEGACY_MODELS: dict[str, str] = {
     "cycle": "Standalone cycle extrapolation was removed; cycle signals are now feature inputs.",
-    "lstm": "The live cached LSTM was removed; use deep_lstm_tcn_fusion.",
-    "tcn": "The live cached TCN was removed; use deep_lstm_tcn_fusion.",
-    "ensemble": "The fixed-weight ensemble was removed; use llm_context_seq_moe or deep_lstm_tcn_fusion.",
+    "lstm": "The live cached LSTM was removed; use oil_context_fusion.",
+    "tcn": "The live cached TCN was removed; use oil_context_fusion.",
+    "ensemble": "The fixed-weight ensemble was removed; use oil_context_fusion.",
+    "motif": "Standalone motif output is now an internal benchmark; use oil_context_fusion.",
+    "pattern_mlp": "Standalone pattern MLP output is now an internal benchmark; use oil_context_fusion.",
+    "deep_lstm_tcn_fusion": "This legacy deep branch was merged into oil_context_fusion.",
+    "llm_context_seq_moe": "This legacy context branch was merged into oil_context_fusion.",
+    "random_walk": "Baseline output is now backtest-only; use oil_context_fusion.",
+    "drift": "Baseline output is now backtest-only; use oil_context_fusion.",
+    "seasonal_naive": "Baseline output is now backtest-only; use oil_context_fusion.",
+    "volatility_scaled_naive": "Baseline output is now backtest-only; use oil_context_fusion.",
 }
 
 DEPRECATED_REPLACEMENTS: dict[str, str] = {
-    "cycle": "deep_lstm_tcn_fusion",
-    "lstm": "deep_lstm_tcn_fusion",
-    "tcn": "deep_lstm_tcn_fusion",
-    "ensemble": "llm_context_seq_moe",
+    name: "oil_context_fusion" for name in REMOVED_LEGACY_MODELS
 }
 
 DEEP_MODELS: tuple[str, ...] = (
+    "oil_context_fusion",
+)
+
+LEGACY_DEEP_MODELS: tuple[str, ...] = (
     "deep_lstm_tcn_fusion",
     "llm_context_seq_moe",
 )

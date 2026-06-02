@@ -1,6 +1,6 @@
 # Architecture
 
-The project separates `backend`, `market_ai`, `frontend`, and `scripts` so the oil-first forecasting dashboard can expand into a universal market forecasting platform.
+The project separates `backend`, `market_ai`, `frontend`, and `scripts` to operate a WTI oil forecasting-only dashboard and single model.
 
 ## Responsibility Split
 
@@ -45,7 +45,7 @@ The LLM is used only as a context encoder inside `market_ai.llm`.
 news/events
 -> LocalEventContextEncoder or OpenAICompatibleLLMEventEncoder
 -> event_context_daily.csv
--> llm_context_seq_moe x_event_context
+-> oil_context_fusion x_event_context
 ```
 
 The LLM does not generate numeric forecast paths.

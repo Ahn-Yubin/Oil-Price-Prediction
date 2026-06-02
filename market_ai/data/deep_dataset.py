@@ -105,9 +105,10 @@ def combine_auxiliary_feature_frames(
     oil_fundamentals: pd.DataFrame | None = None,
     cot: pd.DataFrame | None = None,
     cme_curve: pd.DataFrame | None = None,
+    macro: pd.DataFrame | None = None,
 ) -> pd.DataFrame | None:
     frames = []
-    for source, frame in [("oil_fundamentals", oil_fundamentals), ("cot", cot), ("cme_curve", cme_curve)]:
+    for source, frame in [("oil_fundamentals", oil_fundamentals), ("cot", cot), ("cme_curve", cme_curve), ("macro", macro)]:
         normalized = _normalize_feature_time_frame(frame)
         if normalized is None:
             continue
@@ -160,15 +161,15 @@ def _build_auxiliary_cross_asset_matrix(frame: pd.DataFrame, symbol: str, auxili
     for idx, row in merged.iterrows():
         arr[idx, CROSS_ASSET_FEATURE_COLUMNS.index("spread")] = _first_numeric(
             row,
-            ("m1_m2_spread", "imports_exports_spread", "crude_stocks_change", "cushing_stocks_change"),
+            ("m1_m2_spread", "imports_exports_spread", "crude_stocks_change", "cushing_stocks_change", "DCOILWTICO", "DCOILBRENTEU"),
         )
         arr[idx, CROSS_ASSET_FEATURE_COLUMNS.index("relative_strength")] = _first_numeric(
             row,
-            ("managed_money_net_zscore", "managed_money_net", "refinery_utilization"),
+            ("managed_money_net_zscore", "managed_money_net", "refinery_utilization", "DGS10", "T10YIE"),
         )
         arr[idx, CROSS_ASSET_FEATURE_COLUMNS.index("risk_on_off_proxy")] = _first_numeric(
             row,
-            ("curve_slope_m1_m6", "open_interest_change", "crude_production_change"),
+            ("curve_slope_m1_m6", "open_interest_change", "crude_production_change", "DTWEXBGS", "DEXKOUS", "DEXUSEU", "VIXCLS"),
         )
         arr[idx, CROSS_ASSET_FEATURE_COLUMNS.index("missing_indicator")] = 0.0 if has_feature[idx] else 1.0
     del symbol, feature_cols
@@ -246,6 +247,55 @@ def _event_context_frame_vector(
     return values[:EVENT_CONTEXT_DIM]
 
 
+def _event_context_frame_window_vector(
+    event_context_frame: pd.DataFrame | None,
+    *,
+    symbol: str,
+    start_time: datetime,
+    as_of_time: datetime,
+    normalized: bool = False,
+) -> list[float] | None:
+    frame = event_context_frame if normalized else _normalize_feature_time_frame(event_context_frame)
+    if frame is None or frame.empty:
+        return None
+    if "symbol" in frame.columns:
+        symbol_upper = symbol.upper()
+        frame = frame[frame["symbol"].astype(str).str.upper().isin([symbol_upper, "ALL", "*"])]
+    if frame.empty:
+        return None
+    start_ts = pd.Timestamp(start_time).tz_convert("UTC") if pd.Timestamp(start_time).tzinfo else pd.Timestamp(start_time, tz="UTC")
+    end_ts = pd.Timestamp(as_of_time).tz_convert("UTC") if pd.Timestamp(as_of_time).tzinfo else pd.Timestamp(as_of_time, tz="UTC")
+    window = frame[(frame["feature_available_at"] >= start_ts) & (frame["feature_available_at"] <= end_ts)].copy()
+    if window.empty:
+        return _event_context_frame_vector(
+            frame,
+            symbol=symbol,
+            as_of_time=as_of_time,
+            normalized=True,
+        )
+    names = list(EventContextVector.model_fields)
+    weight_col = "impact_strength" if "impact_strength" in window.columns else "impact_score" if "impact_score" in window.columns else ""
+    if weight_col:
+        weights = pd.to_numeric(window[weight_col], errors="coerce").fillna(1.0).clip(lower=0.05)
+    else:
+        weights = pd.Series(1.0, index=window.index, dtype=float)
+    values: list[float] = []
+    for name in names:
+        series = pd.to_numeric(window[name], errors="coerce").fillna(0.0) if name in window.columns else pd.Series(0.0, index=window.index)
+        if name.startswith("event_count"):
+            values.append(float(np.clip(series.sum(), 0.0, 12.0)))
+        elif name == "uncertainty":
+            values.append(float(np.clip(series.tail(20).mean(), 0.0, 1.0)))
+        elif name == "time_decay":
+            values.append(float(np.clip(series.max(), 0.0, 1.0)))
+        else:
+            weighted = float((series * weights).sum() / max(float(weights.sum()), 1e-8))
+            values.append(weighted)
+    if len(values) < EVENT_CONTEXT_DIM:
+        values.extend([0.0] * (EVENT_CONTEXT_DIM - len(values)))
+    return values[:EVENT_CONTEXT_DIM]
+
+
 def _future_volatility(returns: np.ndarray, start: int, horizon: int) -> np.ndarray:
     vals: list[float] = []
     for h in range(1, horizon + 1):
@@ -317,9 +367,11 @@ def build_deep_dataset_from_frame(
         scaled_target = np.clip(future_log_path / recent_vol, -12.0, 12.0).astype(np.float32)
         future_returns = returns_by_bar[origin + 1 : origin + horizon + 1]
         as_of_time = pd.Timestamp(frame.loc[origin, "date"]).to_pydatetime()
-        event_vector = _event_context_frame_vector(
+        window_start_time = pd.Timestamp(frame.loc[origin - lookback + 1, "date"]).to_pydatetime()
+        event_vector = _event_context_frame_window_vector(
             normalized_event_context,
             symbol=symbol,
+            start_time=window_start_time,
             as_of_time=as_of_time,
             normalized=True,
         )

@@ -31,7 +31,7 @@ CRYPTO_ROOTS = {"BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX", "LINK"
 INDEX_PREFIXES = ("^",)
 
 
-def symbol_candidates(raw_symbol: str, default_symbol: str = "NYMEX:CL1!") -> list[str]:
+def symbol_candidates(raw_symbol: str, default_symbol: str = "CL=F") -> list[str]:
     raw = (raw_symbol or default_symbol).strip()
     if not raw:
         raw = default_symbol
@@ -84,7 +84,7 @@ def infer_asset_class(provider_symbol: str, requested_symbol: str | None = None)
     return AssetClass.unknown
 
 
-def normalize_symbol(raw_symbol: str, default_symbol: str = "NYMEX:CL1!") -> MarketSymbol:
+def normalize_symbol(raw_symbol: str, default_symbol: str = "CL=F") -> MarketSymbol:
     requested = (raw_symbol or default_symbol).strip() or default_symbol
     provider_symbol = symbol_candidates(requested, default_symbol=default_symbol)[0]
     asset_class = infer_asset_class(provider_symbol, requested)

@@ -14,12 +14,18 @@ router = APIRouter()
 
 
 @router.get("/api/chart")
-def chart_data(symbol: str = Query(default=None), interval: str = Query(default=None), models: str | None = Query(default=None)):
+def chart_data(
+    symbol: str = Query(default=None),
+    interval: str = Query(default=None),
+    horizon: int | None = Query(default=None, ge=1),
+    models: str | None = Query(default=None),
+):
     current_settings = get_settings()
     try:
         bundle = build_forecast(
             symbol=symbol or current_settings.default_symbol,
             interval=interval or current_settings.default_interval,
+            horizon=horizon,
             models=models,
             allow_removed_models_as_warning=True,
             settings=current_settings,
