@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from backend.app.api.routes import backtests, chart, data_status, explanation, features, forecast, health, market_context, models
+from backend.app.api.routes import backtests, chart, data_status, explanation, features, forecast, health, market_context, models, report
 from backend.app.web.static_server import register_static_frontend
 from market_ai.config import get_settings
 from market_ai.constants import (
@@ -28,6 +28,7 @@ for router in [
     features.router,
     backtests.router,
     market_context.router,
+    report.router,
     models.router,
     health.router,
 ]:

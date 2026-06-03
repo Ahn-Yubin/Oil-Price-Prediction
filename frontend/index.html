@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Oil Price Forecast Dashboard</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20260602-oil-h30" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=20260603-report" />
   </head>
   <body>
     <main class="wrap">
@@ -116,6 +116,17 @@
         </div>
 
         <aside class="side-column">
+          <section id="forecast-report-panel" class="forecast-report-panel">
+            <div class="explanation-head">
+              <h3 data-i18n="reportTitle">Forecast Report</h3>
+              <button id="report-generate-button" type="button" data-i18n="reportGenerate">Generate</button>
+            </div>
+            <p id="report-summary" data-i18n="reportEmpty">Generate a concise user-facing report from the current forecast.</p>
+            <dl id="report-metrics" class="report-metrics"></dl>
+            <div id="report-sections" class="report-sections"></div>
+            <p id="report-note" class="report-note"></p>
+          </section>
+
           <section id="model-commentary-panel" class="model-commentary-panel">
             <div class="explanation-head">
               <h3 data-i18n="llmCommentary">AI 시황 해설</h3>
@@ -152,6 +163,6 @@
     </main>
 
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="/static/main.js?v=20260602-oil-h30"></script>
+    <script src="/static/main.js?v=20260603-report"></script>
   </body>
 </html>

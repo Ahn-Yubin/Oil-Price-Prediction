@@ -16,6 +16,7 @@ from backend.app.api.routes import features as features_route
 from backend.app.api.routes import forecast as forecast_route
 from backend.app.api.routes import market_context as market_context_route
 from backend.app.api.routes import models as models_route
+from backend.app.api.routes import report as report_route
 from market_ai.config import Settings
 from market_ai.modeling.deep.availability import DeepArtifactAvailability
 from market_ai.schemas.market import (
@@ -230,6 +231,36 @@ def test_market_context_endpoint_returns_overlay_payload(monkeypatch):
     assert body["news"][0]["headline"] == "OPEC supply cut"
     assert body["context_points"][0]["overall_bias"] == "bullish"
     assert "scenario_commentary" in body
+
+
+def test_forecast_report_endpoint_returns_user_summary(monkeypatch):
+    bundle = _forecast_bundle()
+    bundle.forecast_models.append(
+        {
+            "id": "unit_model",
+            "label": "Unit Model",
+            "points": [
+                {"time": 1_700_086_400, "value": 81.0},
+                {"time": 1_700_172_800, "value": 82.0},
+            ],
+        }
+    )
+    monkeypatch.setattr(report_route, "build_forecast", lambda **kwargs: bundle)
+    client = TestClient(main.app)
+    response = client.get("/api/report?symbol=CL=F&interval=1d&horizon=1")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["symbol"] == "CL=F"
+    assert "executive_summary" in body
+    assert body["sections"][0]["title"] == "예측 경로"
+    assert "Unit Model" in str(body)
+    assert "금융 조언이 아닙니다" in body["recommendation_note"]
+    assert "# CL=F 1D 예측 리포트" in body["markdown"]
+
+    english = client.get("/api/report?symbol=CL=F&interval=1d&horizon=1&language=en").json()
+    assert english["sections"][0]["title"] == "Forecast Path"
+    assert "not financial advice" in english["recommendation_note"].lower()
 
 
 def test_live_market_context_does_not_silently_use_cached_news(monkeypatch):
