@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Oil Price Forecast Dashboard</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20260604-layout" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=20260604-commentary-tones" />
   </head>
   <body>
     <main class="wrap">
@@ -85,15 +85,24 @@
               </div>
               <section class="metrics">
                 <article class="metric-card">
-                  <h3>MAE</h3>
+                  <h3>
+                    <span>MAE</span>
+                    <button class="term-help" type="button" aria-label="MAE 설명" data-term="mae">?</button>
+                  </h3>
                   <p id="mae-value">검증 대기</p>
                 </article>
                 <article class="metric-card">
-                  <h3>RMSE</h3>
+                  <h3>
+                    <span>RMSE</span>
+                    <button class="term-help" type="button" aria-label="RMSE 설명" data-term="rmse">?</button>
+                  </h3>
                   <p id="rmse-value">검증 대기</p>
                 </article>
                 <article class="metric-card">
-                  <h3>MAPE</h3>
+                  <h3>
+                    <span>MAPE</span>
+                    <button class="term-help" type="button" aria-label="MAPE 설명" data-term="mape">?</button>
+                  </h3>
                   <p id="mape-value">검증 대기</p>
                 </article>
               </section>
@@ -157,6 +166,6 @@
     </main>
 
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="/static/main.js?v=20260604-layout"></script>
+    <script src="/static/main.js?v=20260604-commentary-tones"></script>
   </body>
 </html>

@@ -46,3 +46,33 @@ def test_commentary_risk_text_has_higher_contrast() -> None:
     assert ".commentary-risks" in styles
     assert "color: #cbd7e5;" in styles
     assert "font-size: 13.5px;" in styles
+
+
+def test_metric_labels_include_accessible_help_tooltips() -> None:
+    index = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    script = (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
+    styles = (FRONTEND_DIR / "src" / "dashboard.css").read_text(encoding="utf-8")
+
+    assert 'data-term="mae"' in index
+    assert 'data-term="rmse"' in index
+    assert 'data-term="mape"' in index
+    assert "const TERM_HELP" in script
+    assert "평균 절대 오차" in script
+    assert ".term-help::after" in styles
+    assert "content: attr(data-tooltip);" in styles
+
+
+def test_model_commentary_highlights_directional_keywords() -> None:
+    index = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    script = (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
+    styles = (FRONTEND_DIR / "src" / "dashboard.css").read_text(encoding="utf-8")
+
+    assert "20260604-commentary-tones" in index
+    assert "const COMMENTARY_KEYWORDS" in script
+    assert "highlightCommentaryText(summary" in script
+    assert "highlightCommentaryText(li" in script
+    assert '"횡보"' in script
+    assert '"우세"' not in script
+    assert "data-tone=\"bullish\"" in styles
+    assert "data-tone=\"bearish\"" in styles
+    assert "data-tone=\"neutral\"" in styles

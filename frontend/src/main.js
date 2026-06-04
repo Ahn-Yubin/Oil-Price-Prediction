@@ -67,6 +67,64 @@ const DEFAULT_MODEL_ORDER = [
 
 const DEFAULT_VISIBLE_MODELS = new Set(["oil_context_fusion"]);
 
+const TERM_HELP = {
+  ko: {
+    mae: "MAE는 평균 절대 오차입니다. 예측값과 실제값의 차이를 절댓값으로 평균낸 값이며 낮을수록 좋습니다.",
+    rmse: "RMSE는 평균 제곱근 오차입니다. 큰 오차에 더 민감한 지표이며 낮을수록 좋습니다.",
+    mape: "MAPE는 평균 절대 백분율 오차입니다. 실제값 대비 예측 오차를 퍼센트로 보여주며 낮을수록 좋습니다.",
+  },
+  en: {
+    mae: "MAE is mean absolute error: the average absolute gap between predicted and actual values. Lower is better.",
+    rmse: "RMSE is root mean squared error. It penalizes larger misses more strongly. Lower is better.",
+    mape: "MAPE is mean absolute percentage error. It expresses forecast error as a percentage of actual values. Lower is better.",
+  },
+};
+
+const COMMENTARY_KEYWORDS = {
+  bullish: [
+    "상승",
+    "상방",
+    "강세",
+    "반등",
+    "회복",
+    "개선",
+    "오르는",
+    "오를",
+    "높아질",
+    "bullish",
+    "upside",
+    "rebound",
+    "recovery",
+    "supportive",
+  ],
+  bearish: [
+    "하락",
+    "하방",
+    "약세",
+    "취약",
+    "악화",
+    "위험",
+    "압박",
+    "떨어질",
+    "낮아질",
+    "bearish",
+    "downside",
+    "weak",
+    "risk",
+    "pressure",
+  ],
+  neutral: [
+    "횡보",
+    "중립",
+    "보합",
+    "기준",
+    "range-bound",
+    "sideways",
+    "neutral",
+    "base",
+  ],
+};
+
 const MODEL_COLORS = {
   oil_context_fusion: "#2dd4bf",
   motif: "#d29922",
@@ -295,6 +353,13 @@ function applyLanguage() {
     toggle.checked = currentLanguage === "en";
     toggle.setAttribute("aria-checked", currentLanguage === "en" ? "true" : "false");
   }
+  document.querySelectorAll(".term-help").forEach((node) => {
+    const key = node.dataset.term;
+    const text = TERM_HELP[currentLanguage]?.[key] || TERM_HELP.ko[key] || "";
+    node.dataset.tooltip = text;
+    node.setAttribute("aria-label", text);
+    node.setAttribute("title", text);
+  });
   updateReportActionButton();
   if (latestPayload) {
     setMetrics(latestPayload.metrics || {}, latestPayload.updated_at, latestPayload.forecast_horizon, latestPayload.confidence_level);
@@ -1229,6 +1294,36 @@ function renderModelCommentaryLoading() {
   if (risks) risks.replaceChildren();
 }
 
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function highlightCommentaryText(target, value) {
+  const text = String(value || "-");
+  const keywordEntries = [
+    ...COMMENTARY_KEYWORDS.bullish.map((keyword) => ({ keyword, tone: "bullish" })),
+    ...COMMENTARY_KEYWORDS.bearish.map((keyword) => ({ keyword, tone: "bearish" })),
+    ...COMMENTARY_KEYWORDS.neutral.map((keyword) => ({ keyword, tone: "neutral" })),
+  ].sort((a, b) => b.keyword.length - a.keyword.length);
+  const pattern = new RegExp(`(${keywordEntries.map((entry) => escapeRegex(entry.keyword)).join("|")})`, "giu");
+  const nodes = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(pattern)) {
+    const keyword = match[0];
+    const index = match.index ?? 0;
+    if (index > lastIndex) nodes.push(document.createTextNode(text.slice(lastIndex, index)));
+    const entry = keywordEntries.find((item) => item.keyword.toLowerCase() === keyword.toLowerCase());
+    const mark = document.createElement("span");
+    mark.className = "commentary-keyword";
+    mark.dataset.tone = entry?.tone || "neutral";
+    mark.textContent = keyword;
+    nodes.push(mark);
+    lastIndex = index + keyword.length;
+  }
+  if (lastIndex < text.length) nodes.push(document.createTextNode(text.slice(lastIndex)));
+  target.replaceChildren(...(nodes.length ? nodes : [document.createTextNode(text)]));
+}
+
 function renderModelCommentary(commentary) {
   latestCommentaryPayload = commentary;
   const status = document.getElementById("commentary-status");
@@ -1248,7 +1343,7 @@ function renderModelCommentary(commentary) {
       ? (currentLanguage === "ko" ? "최근 해설" : "recent")
       : modeLabel;
   }
-  summary.textContent = replaceResolvedSymbolText(commentary.summary || "-", commentary);
+  highlightCommentaryText(summary, replaceResolvedSymbolText(commentary.summary || "-", commentary));
   const notes = [
     commentary.model_interpretation,
     ...(commentary.risk_notes || []),
@@ -1256,7 +1351,7 @@ function renderModelCommentary(commentary) {
   risks.replaceChildren(
     ...(notes.length ? notes : ["No additional notes."]).map((note) => {
       const li = document.createElement("li");
-      li.textContent = replaceResolvedSymbolText(note, commentary);
+      highlightCommentaryText(li, replaceResolvedSymbolText(note, commentary));
       return li;
     }),
   );
