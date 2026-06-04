@@ -15,6 +15,7 @@ from market_ai.constants import (
     INTERVAL_TO_HORIZON,
     INTERVAL_TO_MAX_LOG_BAND,
     INTERVAL_TO_RETURN_CLIP,
+    select_model_horizon,
 )
 from market_ai.modeling.forecasters.baselines import BASELINE_FORECASTERS, ForecastContext
 from market_ai.modeling.deep.availability import DeepArtifactAvailability, deep_artifact_availability
@@ -57,11 +58,7 @@ class ForecastBundle:
 
 
 def _resolve_horizons(interval: str, requested_horizon: int | None) -> tuple[int, int]:
-    model_horizon = INTERVAL_TO_HORIZON.get(interval, INTERVAL_TO_HORIZON[FALLBACK_INTERVAL])
-    if requested_horizon is None or requested_horizon <= 0:
-        return model_horizon, model_horizon
-    display_horizon = max(1, min(int(requested_horizon), model_horizon))
-    return model_horizon, display_horizon
+    return select_model_horizon(interval, requested_horizon)
 
 
 def _finite_float(value: Any, default: float = 0.0) -> float:
@@ -740,6 +737,13 @@ def chart_payload_from_forecast(bundle: ForecastBundle) -> dict[str, Any]:
     predicted = [anchor] + [{"time": point.time, "value": point.p50} for point in response.forecast]
     predicted_lower = [anchor] + [{"time": point.time, "value": point.p10} for point in response.forecast]
     predicted_upper = [anchor] + [{"time": point.time, "value": point.p90} for point in response.forecast]
+    primary_deep_metadata = (response.deep_model_info.get(response.primary_model or "", {}) or {}).get("metadata", {})
+    model_training_cutoff = (
+        primary_deep_metadata.get("training_cutoff")
+        or primary_deep_metadata.get("train_end")
+        or bundle.model_info.get("training_cutoff")
+        or bundle.model_info.get("trained_at")
+    )
 
     return {
         "candles": candles,
@@ -775,7 +779,7 @@ def chart_payload_from_forecast(bundle: ForecastBundle) -> dict[str, Any]:
         "band_label": "calibrated conformal quantile band"
         if response.calibration_status.get("calibration_status") == "calibrated"
         else "volatility-estimated quantile band",
-        "model_trained_at": bundle.model_info.get("trained_at"),
+        "model_trained_at": model_training_cutoff,
         "model_train_symbols": bundle.model_info.get("train_symbols"),
         "model_sample_info": {
             "n_train": bundle.model_info.get("n_train"),

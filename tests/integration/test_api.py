@@ -164,6 +164,50 @@ def test_models_endpoint_uses_requested_interval_horizon(monkeypatch):
     assert body["deep_artifact_policy"]["artifact_horizon"] == 30
 
 
+def test_models_endpoint_uses_nearest_1d_artifact_horizon(monkeypatch):
+    class FakeRegistry:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def scan(self):
+            return []
+
+        def resolve(self, *, model_name, interval=None, horizon=None, asset_class=None):
+            raise models_route.ModelArtifactNotFound("missing")
+
+    seen = []
+
+    def fake_deep_availability(*, settings, model_name, interval, horizon):
+        seen.append((model_name, interval, horizon))
+        return DeepArtifactAvailability(
+            model_name=model_name,
+            interval=interval,
+            horizon=horizon,
+            status="artifact_missing",
+            expected_artifact_file=f"{model_name}_{interval}_h{horizon}.pt",
+            expected_metadata_file=f"{model_name}_{interval}_h{horizon}.json",
+            artifact_path=settings.model_dir / f"{model_name}_{interval}_h{horizon}.pt",
+            metadata_path=settings.metadata_dir / f"{model_name}_{interval}_h{horizon}.json",
+            training_command="train",
+            metadata={},
+            reason="missing",
+        )
+
+    monkeypatch.setattr(models_route, "ModelRegistry", FakeRegistry)
+    monkeypatch.setattr(models_route, "deep_artifact_availability", fake_deep_availability)
+
+    client = TestClient(main.app)
+    body_7 = client.get("/api/models?interval=1d&horizon=7").json()
+    body_14 = client.get("/api/models?interval=1d&horizon=14").json()
+
+    assert ("oil_context_fusion", "1d", 8) in seen
+    assert ("oil_context_fusion", "1d", 14) in seen
+    assert body_7["deep_artifact_policy"]["artifact_horizon"] == 8
+    assert body_7["deep_artifact_policy"]["display_horizon"] == 7
+    assert body_14["deep_artifact_policy"]["artifact_horizon"] == 14
+    assert body_14["deep_artifact_policy"]["display_horizon"] == 14
+
+
 def test_data_status_endpoint(monkeypatch):
     monkeypatch.setattr(data_status_route, "load_market_data_window", lambda *args, **kwargs: _market_window())
     client = TestClient(main.app)
@@ -254,13 +298,20 @@ def test_forecast_report_endpoint_returns_user_summary(monkeypatch):
     assert body["symbol"] == "CL=F"
     assert "executive_summary" in body
     assert body["sections"][0]["title"] == "예측 경로"
-    assert "Unit Model" in str(body)
-    assert "금융 조언이 아닙니다" in body["recommendation_note"]
+    assert "Unit Model" not in str(body)
+    assert "모델 비교" not in str(body)
+    assert body["recommendation_note"] == ""
+    assert "작성일" in body["key_metrics"]
+    assert "예측기간" in body["key_metrics"]
+    assert "마지막" not in str(body["key_metrics"])
     assert "# CL=F 1D 예측 리포트" in body["markdown"]
 
     english = client.get("/api/report?symbol=CL=F&interval=1d&horizon=1&language=en").json()
     assert english["sections"][0]["title"] == "Forecast Path"
-    assert "not financial advice" in english["recommendation_note"].lower()
+    assert "Model Comparison" not in str(english)
+    assert "median path in 1 day" in english["executive_summary"]
+    assert english["recommendation_note"] == ""
+    assert "forecast_period" in english["key_metrics"]
 
 
 def test_live_market_context_does_not_silently_use_cached_news(monkeypatch):

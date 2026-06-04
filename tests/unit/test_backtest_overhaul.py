@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 from market_ai.backtesting.runner import (
     point_metrics,
@@ -7,6 +8,7 @@ from market_ai.backtesting.runner import (
     run_rolling_backtest,
     write_backtest_outputs,
     _quantile_paths_from_point,
+    _online_residual_correction,
 )
 
 
@@ -33,11 +35,42 @@ def test_rolling_origin_split_respects_bounds():
     assert origins[-1] <= 114
 
 
+def test_online_residual_correction_uses_only_available_origins():
+    history = [(idx, np.array([0.01, 0.02, 0.03])) for idx in range(1, 9)]
+    history.append((20, np.array([0.20, 0.20, 0.20])))
+    correction, samples = _online_residual_correction(history, origin=12, horizon=3)
+    assert samples == 8
+    assert correction[0] > 0
+    assert correction[0] < 0.18
+
+    later_correction, later_samples = _online_residual_correction(history, origin=21, horizon=3)
+    assert later_samples == 8
+    assert later_correction[0] <= 0.18
+
+    no_correction, no_samples = _online_residual_correction(history[:7], origin=12, horizon=3)
+    assert no_samples == 0
+    assert np.allclose(no_correction, 0.0)
+
+
 def test_small_synthetic_backtest_and_output_files(tmp_path):
+    dates = pd.date_range("2024-01-01", periods=140, freq="D", tz="UTC")
+    close = _close()
+    candles = pd.DataFrame(
+        {
+            "date": dates,
+            "open": close,
+            "high": close + 0.5,
+            "low": close - 0.5,
+            "close": close,
+            "volume": 1.0,
+        }
+    )
     outputs = run_rolling_backtest(
-        _close(),
+        close,
         "1d",
         ["random_walk", "drift", "flat"],
+        symbol="CL=F",
+        candles=candles,
         lookback=40,
         horizon=5,
         step=10,
@@ -51,5 +84,7 @@ def test_small_synthetic_backtest_and_output_files(tmp_path):
     assert not outputs["horizon_metrics"].empty
     assert not outputs["probabilistic_metrics"].empty
     assert not outputs["regime_metrics"].empty
+    assert "origin_start" in outputs["summary"].columns
+    assert "leakage_audit_status" in outputs["details"].columns
     written = write_backtest_outputs(outputs, tmp_path, "SYN_1d")
     assert all(path.exists() for path in written)

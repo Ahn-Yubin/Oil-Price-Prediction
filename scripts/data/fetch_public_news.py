@@ -16,9 +16,12 @@ if str(ROOT) not in sys.path:
 from market_ai.config import PROJECT_DIR
 from market_ai.data.manifests import entry_from_file, upsert_inventory_entries
 from market_ai.data.providers.public_news_provider import (
+    DEFAULT_PUBLIC_RSS_FEEDS,
+    GOOGLE_NEWS_BACKFILL_QUERIES,
     GOOGLE_NEWS_TOPIC_QUERIES,
     NEWS_TOPIC_QUERIES,
     fetch_gdelt_articles,
+    fetch_generic_rss_feed,
     fetch_google_news_rss,
     fetch_yahoo_finance_rss,
     normalize_public_news,
@@ -45,9 +48,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--status-output", default=str(DATA_ROOT / "interim" / "events" / "public_news_fetch_status.csv"))
     parser.add_argument("--skip-yahoo", action="store_true")
     parser.add_argument("--skip-google-news", action="store_true")
+    parser.add_argument("--skip-extra-rss", action="store_true")
     parser.add_argument("--skip-gdelt", action="store_true")
     parser.add_argument("--merge-existing", action="store_true", default=True)
     parser.add_argument("--replace", dest="merge_existing", action="store_false")
+    parser.add_argument("--google-backfill", action="store_true", help="Fetch Google News RSS in date windows using after:/before: queries.")
+    parser.add_argument("--google-backfill-start", default="", help="UTC start date/datetime for Google News backfill.")
+    parser.add_argument("--google-backfill-end", default="", help="UTC end date/datetime for Google News backfill.")
+    parser.add_argument("--google-backfill-window-days", type=int, default=14)
+    parser.add_argument("--google-backfill-sleep", type=float, default=0.2)
+    parser.add_argument("--google-backfill-retries", type=int, default=2)
+    parser.add_argument("--extra-rss-feeds", default="", help="Comma-separated name=url public RSS feeds. Built-ins are used unless --skip-extra-rss is set.")
     parser.add_argument("--gdelt-start", default="", help="UTC start date/datetime. Defaults to --gdelt-days ago.")
     parser.add_argument("--gdelt-end", default="", help="UTC end date/datetime. Defaults to now.")
     parser.add_argument("--gdelt-days", type=int, default=90)
@@ -86,6 +97,34 @@ def _date_windows(args: argparse.Namespace) -> list[tuple[pd.Timestamp, pd.Times
         windows.append((cursor, next_cursor))
         cursor = next_cursor
     return windows
+
+
+def _date_windows_from_values(start_value: str, end_value: str, *, window_days: int) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    if not start_value or not end_value:
+        return []
+    start = pd.to_datetime(start_value, utc=True)
+    end = pd.to_datetime(end_value, utc=True)
+    step = pd.Timedelta(days=max(1, int(window_days)))
+    windows: list[tuple[pd.Timestamp, pd.Timestamp]] = []
+    cursor = start
+    while cursor < end:
+        next_cursor = min(cursor + step, end)
+        windows.append((cursor, next_cursor))
+        cursor = next_cursor
+    return windows
+
+
+def _extra_rss_feeds(args: argparse.Namespace) -> dict[str, str]:
+    feeds = {} if args.skip_extra_rss else dict(DEFAULT_PUBLIC_RSS_FEEDS)
+    for item in _split(args.extra_rss_feeds):
+        if "=" not in item:
+            continue
+        name, url = item.split("=", 1)
+        name = name.strip()
+        url = url.strip()
+        if name and url:
+            feeds[name] = url
+    return feeds
 
 
 def _expand_topic_symbols(frame: pd.DataFrame, topic: str, selected_symbols: set[str]) -> pd.DataFrame:
@@ -140,6 +179,71 @@ def fetch_news(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame]:
             except Exception as exc:
                 status_rows.append({"provider": "google_news_rss", "topic_or_symbol": topic, "status": "failed", "rows": 0, "error": str(exc)})
                 print(f"[news] google topic={topic} failed={exc}", flush=True)
+
+    if args.google_backfill:
+        windows = _date_windows_from_values(
+            args.google_backfill_start or args.gdelt_start,
+            args.google_backfill_end or args.gdelt_end,
+            window_days=args.google_backfill_window_days,
+        )
+        topics = [topic for topic in _split(args.topics) if topic in GOOGLE_NEWS_BACKFILL_QUERIES]
+        total = max(1, sum(len(GOOGLE_NEWS_BACKFILL_QUERIES[topic]) for topic in topics) * len(windows))
+        done = 0
+        for start, end in windows:
+            for topic in topics:
+                for query in GOOGLE_NEWS_BACKFILL_QUERIES[topic]:
+                    done += 1
+                    dated_query = f"{query} after:{start.date().isoformat()} before:{end.date().isoformat()}"
+                    try:
+                        frame = fetch_google_news_rss(
+                            f"{topic}_backfill",
+                            dated_query,
+                            sleep_seconds=args.google_backfill_sleep,
+                            retries=args.google_backfill_retries,
+                        )
+                        frame = _expand_topic_symbols(frame, topic, selected_symbols)
+                        frames.append(frame)
+                        status_rows.append(
+                            {
+                                "provider": "google_news_rss_backfill",
+                                "topic_or_symbol": topic,
+                                "query": query,
+                                "window_start": start.isoformat(),
+                                "window_end": end.isoformat(),
+                                "status": "ok",
+                                "rows": len(frame),
+                                "error": "",
+                            }
+                        )
+                        print(
+                            f"[news] google-backfill {done}/{total} topic={topic} rows={len(frame)} "
+                            f"query={query} window={start.date()}..{end.date()}",
+                            flush=True,
+                        )
+                    except Exception as exc:
+                        status_rows.append(
+                            {
+                                "provider": "google_news_rss_backfill",
+                                "topic_or_symbol": topic,
+                                "query": query,
+                                "window_start": start.isoformat(),
+                                "window_end": end.isoformat(),
+                                "status": "failed",
+                                "rows": 0,
+                                "error": str(exc),
+                            }
+                        )
+                        print(f"[news] google-backfill {done}/{total} topic={topic} failed={exc}", flush=True)
+
+    for name, url in _extra_rss_feeds(args).items():
+        try:
+            frame = fetch_generic_rss_feed(name, url)
+            frames.append(frame)
+            status_rows.append({"provider": "public_rss", "topic_or_symbol": name, "status": "ok", "rows": len(frame), "error": ""})
+            print(f"[news] rss name={name} rows={len(frame)}", flush=True)
+        except Exception as exc:
+            status_rows.append({"provider": "public_rss", "topic_or_symbol": name, "status": "failed", "rows": 0, "error": str(exc)})
+            print(f"[news] rss name={name} failed={exc}", flush=True)
 
     if not args.skip_gdelt:
         windows = _date_windows(args)

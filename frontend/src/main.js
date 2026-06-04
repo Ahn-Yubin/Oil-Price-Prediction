@@ -31,10 +31,13 @@ let lastContextKey = "";
 let lastContextLoadMs = 0;
 let lastCommentaryKey = "";
 let lastCommentaryLoadMs = 0;
+let lastReportKey = "";
 let chartRequestInFlight = false;
 let contextRequestInFlight = false;
 let commentaryRequestInFlight = false;
 let commentaryRequestVersion = 0;
+let reportRequestInFlight = false;
+let reportRequestVersion = 0;
 let loadingState = { chart: false, context: false, commentary: false, backtest: false, report: false };
 
 const CONTEXT_REFRESH_MS = 300_000;
@@ -85,7 +88,7 @@ const I18N = {
     backtest: "백테스트",
     live: "라이브",
     llmCommentary: "AI 시황 해설",
-    newsContext: "뉴스와 시나리오",
+    newsContext: "뉴스 해석",
     bull: "상방",
     base: "기준",
     bear: "하방",
@@ -132,8 +135,8 @@ const I18N = {
     trainRequired: "학습 필요",
     bandVolBased: "변동성 기반",
     reportTitle: "예측 리포트",
-    reportGenerate: "리포트 작성",
-    reportGenerating: "리포트 작성 중",
+    reportDownload: "PDF 저장",
+    reportGenerating: "리포트 갱신 중",
     reportEmpty: "현재 예측 결과를 사용자용 요약 리포트로 작성합니다.",
     reportUnavailable: "리포트를 불러오지 못했습니다.",
   },
@@ -147,7 +150,7 @@ const I18N = {
     backtest: "Backtest",
     live: "Live",
     llmCommentary: "AI Market Commentary",
-    newsContext: "News & Scenario Context",
+    newsContext: "News Interpretation",
     bull: "Bull",
     base: "Base",
     bear: "Bear",
@@ -194,8 +197,8 @@ const I18N = {
     trainRequired: "Train required",
     bandVolBased: "Vol based",
     reportTitle: "Forecast Report",
-    reportGenerate: "Generate",
-    reportGenerating: "Generating report",
+    reportDownload: "Save PDF",
+    reportGenerating: "Refreshing report",
     reportEmpty: "Generate a concise user-facing report from the current forecast.",
     reportUnavailable: "Report unavailable.",
   },
@@ -224,9 +227,13 @@ function setLanguage(language, refreshPanels = true) {
   if (!refreshPanels) return;
   lastContextKey = "";
   lastCommentaryKey = "";
+  lastReportKey = "";
   commentaryRequestVersion += 1;
+  reportRequestVersion += 1;
   commentaryRequestInFlight = false;
+  reportRequestInFlight = false;
   renderModelCommentaryLoading();
+  renderForecastReportLoading();
   const intervalInput = document.getElementById("interval-input");
   const horizonInput = document.getElementById("horizon-input");
   refreshDashboardPanels(
@@ -235,7 +242,7 @@ function setLanguage(language, refreshPanels = true) {
     forecastModelsQuery(),
     horizonInput?.value || "",
     requestVersion,
-    { forceContext: false, forceCommentary: true },
+    { forceContext: false, forceCommentary: true, forceReport: true },
   );
 }
 
@@ -270,6 +277,7 @@ function setLoadingState(kind, active) {
     chartMessage.textContent = t("loadingChart");
     chartOverlay.classList.toggle("hidden", !showChartOverlay);
   }
+  updateReportActionButton();
 }
 
 function applyLanguage() {
@@ -287,6 +295,7 @@ function applyLanguage() {
     toggle.checked = currentLanguage === "en";
     toggle.setAttribute("aria-checked", currentLanguage === "en" ? "true" : "false");
   }
+  updateReportActionButton();
   if (latestPayload) {
     setMetrics(latestPayload.metrics || {}, latestPayload.updated_at, latestPayload.forecast_horizon, latestPayload.confidence_level);
     setDataStatusBadge(latestPayload.data_status);
@@ -849,33 +858,24 @@ function renderMarketContextPanel(contextPayload) {
   latestContextPayload = contextPayload;
   const mode = document.getElementById("context-mode");
   const summary = document.getElementById("scenario-summary");
-  const bull = document.getElementById("scenario-bull");
-  const base = document.getElementById("scenario-base");
-  const bear = document.getElementById("scenario-bear");
   const eventsRoot = document.getElementById("context-events");
   if (!eventsRoot) return;
   if (!contextPayload) {
     if (mode) mode.textContent = "-";
     if (summary) summary.textContent = t("noContext");
-    if (bull) bull.textContent = "-";
-    if (base) base.textContent = "-";
-    if (bear) bear.textContent = "-";
     eventsRoot.replaceChildren(document.createTextNode(t("noContext")));
     renderNewsTimeline(null);
     return;
   }
   const scenario = contextPayload?.scenario_commentary || {};
   if (mode) {
-    const llmMode = contextPayload?.llm_context_summary?.role || scenario.mode || "context";
     const source = localizeNewsSource(contextPayload?.news_source);
-    mode.textContent = `${source} · ${localizeRole(llmMode)}`;
+    mode.textContent = source;
   }
-  if (summary) summary.textContent = localizeScenarioText(scenario.summary || "-");
-  if (bull) bull.textContent = localizeScenarioText(scenario.bull || "-", "bull");
-  if (base) base.textContent = localizeScenarioText(scenario.base || "-", "base");
-  if (bear) bear.textContent = localizeScenarioText(scenario.bear || "-", "bear");
 
   const contextPoints = contextPayload?.context_points || [];
+  const latestInterpretation = [...contextPoints].reverse().find((point) => point?.explanation)?.explanation;
+  if (summary) summary.textContent = localizeScenarioText(latestInterpretation || scenario.summary || "-");
   const newsByDay = new Map();
   (contextPayload?.news || []).forEach((item) => {
     const day = new Date(Number(item.time) * 1000).toISOString().slice(0, 10);
@@ -900,22 +900,19 @@ function renderMarketContextPanel(contextPayload) {
     const head = document.createElement("div");
     head.className = "context-event-head";
     const title = document.createElement("strong");
-    title.textContent = `${day} · ${String(point.overall_bias || "neutral").toUpperCase()}`;
+    title.textContent = day;
     const score = document.createElement("span");
-    score.textContent =
-      currentLanguage === "ko"
-        ? `중요도 ${Number(point.impact_score || 0).toFixed(2)} · 뉴스 ${point.event_count || 0}`
-        : `impact ${Number(point.impact_score || 0).toFixed(2)} · news ${point.event_count || 0}`;
+    score.textContent = localizeRole(point.overall_bias || "neutral");
     head.append(title, score);
     const body = document.createElement("p");
     headlines.forEach((node, idx) => {
       if (idx) body.append(document.createTextNode(" / "));
       body.append(node);
     });
-    const factors = document.createElement("p");
-    factors.className = "context-event-factors";
-    factors.textContent = eventFactorText(point);
-    item.append(head, body, factors);
+    const interpretation = document.createElement("p");
+    interpretation.className = "context-event-interpretation";
+    interpretation.textContent = localizeScenarioText(point.explanation || "-");
+    item.append(head, body, interpretation);
     return item;
   });
   const warnings = (contextPayload?.news_warnings || []).filter(Boolean);
@@ -953,10 +950,10 @@ async function loadModelCommentary(symbol, interval, models = "", originTime = n
   return response.json();
 }
 
-async function loadForecastReport(symbol, interval, models = "", horizon = "") {
+async function loadForecastReport(symbol, interval, models = "", horizon = "", language = currentLanguage) {
   const modelQuery = models ? `&models=${encodeURIComponent(models)}` : "";
   const horizonQuery = horizon ? `&horizon=${encodeURIComponent(horizon)}` : "";
-  const languageQuery = `&language=${encodeURIComponent(currentLanguage)}`;
+  const languageQuery = `&language=${encodeURIComponent(language)}`;
   const response = await fetch(
     `/api/report?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}${horizonQuery}${modelQuery}${languageQuery}&_ts=${Date.now()}`,
     { cache: "no-store" },
@@ -965,19 +962,35 @@ async function loadForecastReport(symbol, interval, models = "", horizon = "") {
   return response.json();
 }
 
+function updateReportActionButton() {
+  const button = document.getElementById("report-download-button");
+  if (!button) return;
+  button.disabled = Boolean(loadingState.report);
+  button.setAttribute("aria-label", t("reportDownload"));
+  button.setAttribute("title", t("reportDownload"));
+}
+
+function renderForecastReportLoading() {
+  latestReportPayload = null;
+  const summary = document.getElementById("report-summary");
+  const metrics = document.getElementById("report-metrics");
+  const sections = document.getElementById("report-sections");
+  if (summary) summary.textContent = t("reportGenerating");
+  metrics?.replaceChildren();
+  sections?.replaceChildren();
+}
+
 function renderForecastReport(report) {
   latestReportPayload = report;
   const summary = document.getElementById("report-summary");
   const metrics = document.getElementById("report-metrics");
   const sections = document.getElementById("report-sections");
-  const note = document.getElementById("report-note");
-  if (!summary || !metrics || !sections || !note) return;
+  if (!summary || !metrics || !sections) return;
 
   if (!report) {
     summary.textContent = t("reportEmpty");
     metrics.replaceChildren();
     sections.replaceChildren();
-    note.textContent = "";
     return;
   }
 
@@ -1009,25 +1022,21 @@ function renderForecastReport(report) {
       return article;
     }),
   );
-
-  const warnings = (report.warnings || []).filter(Boolean).slice(0, 3);
-  note.textContent = [report.recommendation_note, ...warnings].filter(Boolean).join(" ");
 }
 
-async function generateForecastReport() {
-  const button = document.getElementById("report-generate-button");
-  const symbol = currentOilSymbol();
-  const interval = document.getElementById("interval-input")?.value || "1d";
-  const horizon = document.getElementById("horizon-input")?.value || "";
-  if (button) {
-    button.disabled = true;
-    button.textContent = t("reportGenerating");
-  }
+async function refreshForecastReport(symbol, interval, models = "", horizon = "", reqId = requestVersion) {
+  const reportReqId = ++reportRequestVersion;
+  const languageAtRequest = currentLanguage;
+  reportRequestInFlight = true;
   setLoadingState("report", true);
+  renderForecastReportLoading();
   try {
-    const report = await loadForecastReport(symbol, interval, forecastModelsQuery(), horizon);
+    const report = await loadForecastReport(symbol, interval, models, horizon, languageAtRequest);
+    if (reqId !== requestVersion || reportReqId !== reportRequestVersion || currentLanguage !== languageAtRequest) return null;
     renderForecastReport(report);
+    return report;
   } catch (error) {
+    if (reqId !== requestVersion || reportReqId !== reportRequestVersion || currentLanguage !== languageAtRequest) return null;
     console.error(error);
     renderForecastReport({
       executive_summary: t("reportUnavailable"),
@@ -1036,13 +1045,80 @@ async function generateForecastReport() {
       warnings: [String(error?.message || error)],
       recommendation_note: "",
     });
+    return null;
   } finally {
-    setLoadingState("report", false);
-    if (button) {
-      button.disabled = false;
-      button.textContent = t("reportGenerate");
+    if (reportReqId === reportRequestVersion) {
+      reportRequestInFlight = false;
+      setLoadingState("report", false);
     }
   }
+}
+
+function buildForecastReportPrintView(report) {
+  const root = document.createElement("article");
+  root.className = "forecast-report-print";
+
+  const title = document.createElement("h1");
+  title.textContent = report.title || t("reportTitle");
+  root.append(title);
+
+  const summary = document.createElement("p");
+  summary.className = "print-summary";
+  summary.textContent = report.executive_summary || "-";
+  root.append(summary);
+
+  const metricEntries = Object.entries(report.key_metrics || {});
+  if (metricEntries.length) {
+    const metrics = document.createElement("dl");
+    metrics.className = "print-metrics";
+    metricEntries.forEach(([key, value]) => {
+      const dt = document.createElement("dt");
+      dt.textContent = key.replaceAll("_", " ");
+      const dd = document.createElement("dd");
+      dd.textContent = String(value ?? "-");
+      metrics.append(dt, dd);
+    });
+    root.append(metrics);
+  }
+
+  (report.sections || []).forEach((section) => {
+    const article = document.createElement("section");
+    const heading = document.createElement("h2");
+    heading.textContent = section.title || "-";
+    const body = document.createElement("p");
+    body.textContent = section.body || "";
+    article.append(heading, body);
+    const bullets = (section.bullets || []).filter(Boolean);
+    if (bullets.length) {
+      const list = document.createElement("ul");
+      bullets.forEach((bullet) => {
+        const item = document.createElement("li");
+        item.textContent = bullet;
+        list.append(item);
+      });
+      article.append(list);
+    }
+    root.append(article);
+  });
+
+  return root;
+}
+
+async function printForecastReportPdf() {
+  const symbol = currentOilSymbol();
+  const interval = document.getElementById("interval-input")?.value || "1d";
+  const horizon = document.getElementById("horizon-input")?.value || "";
+  const report = latestReportPayload || await refreshForecastReport(symbol, interval, forecastModelsQuery(), horizon);
+  if (!report) return;
+
+  const printRoot = buildForecastReportPrintView(report);
+  document.body.append(printRoot);
+  const cleanup = () => printRoot.remove();
+  window.addEventListener("afterprint", cleanup, { once: true });
+  window.print();
+  window.setTimeout(() => {
+    if (document.body.contains(printRoot)) cleanup();
+  }, 60_000);
 }
 
 async function loadAssistantChat(question) {
@@ -2130,6 +2206,15 @@ function refreshDashboardPanels(symbol, interval, selectedModels, selectedHorizo
   } else {
     renderModelCommentary(latestCommentaryPayload);
   }
+
+  const reportKey = `${panelKey}|${latestPayload?.updated_at || ""}|${currentLanguage}`;
+  const shouldRefreshReport = options.forceReport || reportKey !== lastReportKey || !latestReportPayload;
+  if (shouldRefreshReport && !reportRequestInFlight) {
+    lastReportKey = reportKey;
+    void refreshForecastReport(symbol, interval, selectedModels, selectedHorizon, reqId);
+  } else if (!reportRequestInFlight) {
+    renderForecastReport(latestReportPayload);
+  }
 }
 
 async function initDashboard(symbol, interval, options = {}) {
@@ -2197,7 +2282,7 @@ function bindControls() {
   const languageToggle = document.getElementById("language-toggle");
   const languageToggleShell = document.querySelector(".language-toggle");
   const backtestModeToggle = document.getElementById("backtest-mode-toggle");
-  const reportButton = document.getElementById("report-generate-button");
+  const reportButton = document.getElementById("report-download-button");
   const triggerSearch = () => {
     const symbol = currentOilSymbol();
     const interval = intervalInput?.value || "1d";
@@ -2217,6 +2302,9 @@ function bindControls() {
     activeBacktestPayload = null;
     activeBacktestOriginMarker = null;
     lastCommentaryKey = "";
+    lastReportKey = "";
+    reportRequestVersion += 1;
+    reportRequestInFlight = false;
     latestReportPayload = null;
     renderForecastReport(null);
     renderModelCommentaryLoading();
@@ -2244,7 +2332,7 @@ function bindControls() {
       closeNewsPopover();
     }
   });
-  reportButton?.addEventListener("click", generateForecastReport);
+  reportButton?.addEventListener("click", printForecastReportPdf);
   intervalInput.addEventListener("change", triggerSearch);
   horizonInput?.addEventListener("change", triggerSearch);
   languageToggle?.addEventListener("change", () => {

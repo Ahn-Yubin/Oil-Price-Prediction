@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import json
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlparse, urlencode
 from xml.etree import ElementTree
 
 import pandas as pd
@@ -23,6 +23,37 @@ GOOGLE_NEWS_TOPIC_QUERIES = {
     "metals": '"gold prices" OR "silver prices" OR "copper prices"',
     "fx_macro": '"US dollar" OR "Federal Reserve" OR "Treasury yields" OR "Korean won"',
     "equities_vol": '"S&P 500" OR Nasdaq OR VIX OR "equity volatility"',
+}
+
+GOOGLE_NEWS_BACKFILL_QUERIES = {
+    "energy": (
+        '"crude oil"',
+        '"oil prices"',
+        '"WTI crude"',
+        '"Brent crude"',
+        "OPEC",
+        '"oil supply disruption"',
+        '"oil inventory"',
+        '"Middle East oil"',
+        '"Iran oil"',
+    ),
+    "fx_macro": (
+        '"US dollar"',
+        '"Federal Reserve"',
+        '"Treasury yields"',
+    ),
+    "equities_vol": (
+        '"S&P 500"',
+        "Nasdaq",
+        "VIX",
+    ),
+}
+
+DEFAULT_PUBLIC_RSS_FEEDS = {
+    "eia_today_in_energy": "https://www.eia.gov/rss/todayinenergy.xml",
+    "eia_whats_new": "https://www.eia.gov/rss/whatsnew.xml",
+    "oilprice_main": "https://oilprice.com/rss/main",
+    "investing_commodities": "https://www.investing.com/rss/news_11.rss",
 }
 
 
@@ -103,8 +134,8 @@ def google_news_rss_url(query: str) -> str:
     )
 
 
-def fetch_google_news_rss(topic: str, query: str) -> pd.DataFrame:
-    payload = _read_url(google_news_rss_url(query), retries=2)
+def fetch_google_news_rss(topic: str, query: str, *, sleep_seconds: float = 0.0, retries: int = 2) -> pd.DataFrame:
+    payload = _read_url(google_news_rss_url(query), sleep_seconds=sleep_seconds, retries=retries)
     root = ElementTree.fromstring(payload)
     rows: list[dict[str, object]] = []
     for item in root.findall("./channel/item"):
@@ -120,6 +151,30 @@ def fetch_google_news_rss(topic: str, query: str) -> pd.DataFrame:
                 "headline": title,
                 "body": (item.findtext("description") or "").strip(),
                 "source": f"google_news_rss:{topic}:{source}",
+                "url": (item.findtext("link") or "").strip(),
+                "retrieved_at": _utc_now_iso(),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def fetch_generic_rss_feed(name: str, url: str, *, symbol: str = "ALL", sleep_seconds: float = 0.0, retries: int = 1) -> pd.DataFrame:
+    payload = _read_url(url, sleep_seconds=sleep_seconds, retries=retries)
+    root = ElementTree.fromstring(payload)
+    rows: list[dict[str, object]] = []
+    for item in root.findall("./channel/item"):
+        published = _parse_time(item.findtext("pubDate") or item.findtext("date") or item.findtext("updated"))
+        title = (item.findtext("title") or "").strip()
+        if published is None or not title:
+            continue
+        source = item.findtext("source") or name or urlparse(url).netloc
+        rows.append(
+            {
+                "published_at": published.isoformat(),
+                "symbol": symbol,
+                "headline": title,
+                "body": (item.findtext("description") or item.findtext("summary") or "").strip(),
+                "source": f"rss:{source}",
                 "url": (item.findtext("link") or "").strip(),
                 "retrieved_at": _utc_now_iso(),
             }

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from market_ai.backtesting.runner import download_close, run_rolling_backtest, write_backtest_outputs
+from market_ai.backtesting.runner import download_candles, run_rolling_backtest, write_backtest_outputs
 from market_ai.config import PROJECT_DIR
 from market_ai.constants import INTERVAL_TO_HORIZON
 
@@ -49,9 +49,11 @@ def main() -> None:
         "model_availability": [],
     }
     failures = []
+    data_sources = {}
     for symbol in symbols:
         try:
-            close = download_close(symbol, args.interval)
+            candles = download_candles(symbol, args.interval)
+            close = candles["close"].to_numpy(dtype=float)
             horizon = args.horizon or INTERVAL_TO_HORIZON[args.interval]
             lookback = args.lookback or {"1d": 260, "1h": 420, "30m": 420, "15m": 560}.get(args.interval, 420)
             step = args.step or max(1, horizon // 4)
@@ -59,6 +61,8 @@ def main() -> None:
                 close,
                 args.interval,
                 models,
+                symbol=symbol,
+                candles=candles,
                 lookback=lookback,
                 horizon=horizon,
                 step=step,
@@ -67,6 +71,11 @@ def main() -> None:
                 expanding=False,
                 include_regime_breakdown=True,
             )
+            data_sources[symbol] = {
+                "source": candles.attrs.get("source", "yfinance"),
+                "path": candles.attrs.get("source_path"),
+                "rows": int(len(candles)),
+            }
             prefix = f"{symbol.replace('=', '_')}_{args.interval}"
             write_backtest_outputs(outputs, output_dir, prefix)
             for key in all_frames:
@@ -87,6 +96,7 @@ def main() -> None:
         "models": models,
         "max_origins": args.max_origins,
         "failures": failures,
+        "data_sources": data_sources,
         "output_dir": str(output_dir.relative_to(PROJECT_DIR)),
     }
     (output_dir / "summary.md").write_text(_summary_md(summary, all_frames), encoding="utf-8")
@@ -105,6 +115,7 @@ def _summary_md(summary: dict, frames: dict[str, list[pd.DataFrame]]) -> str:
         f"- interval: {summary['interval']}",
         f"- symbols: {', '.join(summary['symbols'])}",
         f"- max_origins: {summary['max_origins']}",
+        f"- data_sources: {summary.get('data_sources', {})}",
         "",
     ]
     if leaderboard.empty:

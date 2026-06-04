@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
-from market_ai.constants import FALLBACK_INTERVAL, INTERVAL_TO_HORIZON, SUPPORTED_DISPLAY_HORIZONS, SUPPORTED_FORECAST_INTERVALS
+from market_ai.constants import FALLBACK_INTERVAL, SUPPORTED_DISPLAY_HORIZONS, SUPPORTED_FORECAST_INTERVALS, select_model_horizon
 from market_ai.config import PROJECT_DIR, get_settings
 from market_ai.modeling.deep.availability import deep_artifact_availability
 from market_ai.modeling.model_catalog import BACKTEST_ONLY_MODELS, BASELINE_MODELS, CLASSICAL_MODELS, DEEP_MODELS, LEGACY_ARTIFACT_MODELS, REMOVED_LEGACY_MODELS, USER_FACING_MODELS
@@ -46,9 +46,8 @@ def models(
     settings = get_settings()
     registry = ModelRegistry(settings)
     default_interval = interval or settings.default_interval or FALLBACK_INTERVAL
-    artifact_horizon = INTERVAL_TO_HORIZON.get(default_interval, INTERVAL_TO_HORIZON[FALLBACK_INTERVAL])
-    requested_horizon = horizon or artifact_horizon
-    display_horizon = max(1, min(int(requested_horizon), artifact_horizon))
+    artifact_horizon, display_horizon = select_model_horizon(default_interval, horizon)
+    requested_horizon = horizon or display_horizon
     deep_availability = {
         model_name: deep_artifact_availability(
             settings=settings,
@@ -82,7 +81,7 @@ def models(
             "display_horizon": display_horizon,
             "display_horizon_options": list(SUPPORTED_DISPLAY_HORIZONS),
             "operating_intervals": sorted(SUPPORTED_FORECAST_INTERVALS),
-            "horizon_mode": "single_max_horizon_artifact_sliced_for_display",
+            "horizon_mode": "nearest_available_artifact_sliced_for_display",
             "production_status": "available",
             "non_production_statuses": ["smoke_only", "synthetic_only", "failed", "metadata_only"],
         },

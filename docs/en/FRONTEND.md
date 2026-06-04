@@ -13,11 +13,11 @@ The frontend is a WTI oil (`CL=F`) TradingView Lightweight Charts-style forecast
 
 The UI calls `/api/forecast` first and uses `/api/chart` compatibility payloads when needed. `/api/chart` must remain compatible with the existing overlay.
 
-The right-side context panel calls `/api/market-context`. When a user selects a historical candle and runs a backtest visualization, the chart calls `/api/backtests/visualization`. The bottom commentary panel calls `/api/model-commentary`.
+The desktop screen uses a three-column layout: the chart on the left, AI market commentary/news interpretation in the middle via `/api/model-commentary` and `/api/market-context`, and the forecast report on the right. When a user selects a historical candle and runs a backtest visualization, the chart calls `/api/backtests/visualization`.
 
 - `news`: recent headlines and sources
 - `context_points`: event/context dates for chart markers
-- `scenario_commentary`: bull/base/bear scenario commentary
+- `scenario_commentary`: backend compatibility field. The UI shows news and LLM interpretation instead of bull/base/bear cards.
 - `llm_context_summary`: whether LLM context is active and usable
 
 The backtest visualization payload keeps the same base chart keys and adds:
@@ -35,11 +35,10 @@ Current display targets:
 - `CL=F` historical candles
 - forecast p50 path
 - p10/p90 or p05/p95 band
-- bull/base/bear scenario summary
 - historical news/context markers
-- event/context card list
+- news headline cards with the LLM interpretation of each news/event point
 - translucent realized candle overlay after the selected origin
-- full-width bottom model forecast commentary
+- middle AI commentary/news interpretation panels and right-side forecast report panel
 
 Markers indicate what context existed around that date. They are not numeric price forecasts made by the LLM.
 
@@ -52,6 +51,7 @@ Markers indicate what context existed around that date. They are not numeric pri
 - `/api/forecast`, `/api/chart`, `/api/market-context`, `/api/model-commentary`, and `/api/backtests/visualization` receive the same horizon value.
 - Chart height is reduced to 460px so page-level scrolling is easier.
 - The right context event list no longer has its own inner scroll, avoiding conflicts with page scrolling.
+- The news panel shows only headlines and LLM interpretation, without extra scenario card copy.
 - Running a backtest tries to preserve the existing chart time scale and price scale.
 
 ## UX Principles

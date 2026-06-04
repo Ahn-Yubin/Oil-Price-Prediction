@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import math
 from typing import Any
 import json
 
@@ -14,6 +15,10 @@ from market_ai.schemas.market import Candle, MarketDataWindow
 
 
 router = APIRouter()
+
+ONLINE_RESIDUAL_WINDOW = 8
+ONLINE_RESIDUAL_GAIN = 2.0
+ONLINE_RESIDUAL_MAX_ABS_LOG = 0.18
 
 
 def _parse_origin_time(value: str) -> int:
@@ -74,6 +79,117 @@ def _backtest_metric_summary(payload: dict[str, Any], actual_future: list[dict[s
         "metric_mode": "backtest",
         "metric_label": "Backtest origin metrics",
         "metric_samples": len(actual_values),
+    }
+
+
+def _log_residual_vector(payload: dict[str, Any], actual_future: list[dict[str, Any]], horizon: int) -> list[float] | None:
+    predicted = payload.get("predicted") or []
+    pred_values = [point.get("value") for point in predicted[1 : horizon + 1]]
+    actual_values = [candle.get("close") for candle in actual_future[:horizon]]
+    if len(pred_values) != horizon or len(actual_values) != horizon:
+        return None
+    residuals: list[float] = []
+    for pred, actual in zip(pred_values, actual_values):
+        try:
+            pred_value = float(pred)
+            actual_value = float(actual)
+        except (TypeError, ValueError):
+            return None
+        if pred_value <= 0.0 or actual_value <= 0.0:
+            return None
+        residuals.append(math.log(actual_value / pred_value))
+    return residuals
+
+
+def _apply_log_correction_to_series(series: list[dict[str, Any]], correction: list[float]) -> None:
+    for idx, delta in enumerate(correction, start=1):
+        if idx >= len(series):
+            break
+        value = series[idx].get("value")
+        try:
+            value_float = float(value)
+        except (TypeError, ValueError):
+            continue
+        if value_float > 0.0:
+            series[idx]["value"] = value_float * math.exp(delta)
+
+
+def _apply_online_residual_calibration(
+    *,
+    payload: dict[str, Any],
+    full_market: MarketDataWindow,
+    candles: list[Candle],
+    origin_idx: int,
+    requested_symbol: str,
+    requested_interval: str,
+    horizon: int,
+    models: str | None,
+    settings: Any,
+) -> dict[str, Any]:
+    model_trained_at = payload.get("model_trained_at")
+    if model_trained_at:
+        cutoff = pd.to_datetime(model_trained_at, errors="coerce", utc=True)
+        origin_time = datetime.fromtimestamp(candles[origin_idx].time, tz=timezone.utc)
+        if pd.notna(cutoff) and origin_time <= cutoff.to_pydatetime():
+            return {"applied": False, "reason": "origin_overlaps_artifact_sample_window", "samples": 0}
+
+    last_calibration_origin = origin_idx - horizon
+    if horizon <= 0 or last_calibration_origin < 1:
+        return {"applied": False, "reason": "not_enough_prior_actuals", "samples": 0}
+
+    first_calibration_origin = max(1, last_calibration_origin - ONLINE_RESIDUAL_WINDOW + 1)
+    residuals: list[list[float]] = []
+    for calibration_origin_idx in range(first_calibration_origin, last_calibration_origin + 1):
+        calibration_market = _point_in_time_window(
+            full_market.model_copy(update={"candles": candles}),
+            candles[: calibration_origin_idx + 1],
+        )
+        try:
+            calibration_bundle = build_forecast(
+                symbol=requested_symbol,
+                interval=requested_interval,
+                horizon=horizon,
+                models=models,
+                include_scenarios=False,
+                allow_removed_models_as_warning=True,
+                settings=settings,
+                market_override=calibration_market,
+            )
+        except (ForecastUnavailable, ValueError):
+            continue
+        calibration_payload = chart_payload_from_forecast(calibration_bundle)
+        calibration_actual = _actual_future_candles(candles, calibration_origin_idx, calibration_bundle.horizon)
+        vector = _log_residual_vector(calibration_payload, calibration_actual, horizon)
+        if vector is not None:
+            residuals.append(vector)
+
+    if len(residuals) < ONLINE_RESIDUAL_WINDOW:
+        return {"applied": False, "reason": "not_enough_prior_residuals", "samples": len(residuals)}
+
+    correction = []
+    for step_values in zip(*residuals):
+        raw_delta = ONLINE_RESIDUAL_GAIN * (sum(step_values) / len(step_values))
+        correction.append(max(-ONLINE_RESIDUAL_MAX_ABS_LOG, min(ONLINE_RESIDUAL_MAX_ABS_LOG, raw_delta)))
+
+    for key in ["predicted", "predicted_lower", "predicted_upper", "predicted_tail_lower", "predicted_tail_upper"]:
+        series = payload.get(key)
+        if isinstance(series, list):
+            _apply_log_correction_to_series(series, correction)
+
+    primary_model = payload.get("primary_model")
+    for model in payload.get("forecast_models") or []:
+        if primary_model and model.get("id") != primary_model:
+            continue
+        points = model.get("points")
+        if isinstance(points, list):
+            _apply_log_correction_to_series(points, correction)
+
+    return {
+        "applied": True,
+        "samples": len(residuals),
+        "window": ONLINE_RESIDUAL_WINDOW,
+        "gain": ONLINE_RESIDUAL_GAIN,
+        "max_abs_log_correction": ONLINE_RESIDUAL_MAX_ABS_LOG,
     }
 
 
@@ -178,6 +294,17 @@ def backtest_visualization(
 
     origin_candle = candles[origin_idx]
     payload = chart_payload_from_forecast(bundle)
+    online_calibration = _apply_online_residual_calibration(
+        payload=payload,
+        full_market=full_market,
+        candles=candles,
+        origin_idx=origin_idx,
+        requested_symbol=requested_symbol,
+        requested_interval=requested_interval,
+        horizon=bundle.horizon,
+        models=models,
+        settings=current_settings,
+    )
     actual_future = _actual_future_candles(candles, origin_idx, bundle.horizon)
     payload["metrics"] = {
         **(payload.get("metrics") or {}),
@@ -198,6 +325,7 @@ def backtest_visualization(
                 "horizon": bundle.horizon,
                 "symbol": payload.get("symbol_resolved"),
                 "interval": payload.get("interval_resolved"),
+                "online_residual_calibration": online_calibration,
             },
         }
     )

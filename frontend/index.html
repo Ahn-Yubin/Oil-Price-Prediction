@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Oil Price Forecast Dashboard</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20260603-report" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=20260604-layout" />
   </head>
   <body>
     <main class="wrap">
@@ -44,7 +44,7 @@
       </section>
 
       <div class="dashboard-grid">
-        <div class="main-column">
+        <div class="chart-column">
           <section class="chart-panel">
             <div class="chart-panel-head">
               <div class="chart-mode-control">
@@ -100,33 +100,9 @@
             </div>
           </section>
 
-          <section id="llm-chat-panel" class="llm-chat-panel">
-            <div class="explanation-head">
-              <h3 data-i18n="chatTitle">AI 시황 질문</h3>
-              <span data-i18n="chatScope">현재 종목/뉴스/모델 기준</span>
-            </div>
-            <div id="llm-chat-log" class="llm-chat-log">
-              <p data-i18n="chatEmpty">예측 결과나 시황에 대해 짧게 질문해보세요.</p>
-            </div>
-            <form id="llm-chat-form" class="llm-chat-form">
-              <input id="llm-chat-input" type="text" data-i18n-placeholder="chatPlaceholder" placeholder="예: 지금 상승 예측의 핵심 근거가 뭐야?" autocomplete="off" />
-              <button id="llm-chat-submit" type="button" data-i18n="chatAsk">질문</button>
-            </form>
-          </section>
         </div>
 
-        <aside class="side-column">
-          <section id="forecast-report-panel" class="forecast-report-panel">
-            <div class="explanation-head">
-              <h3 data-i18n="reportTitle">Forecast Report</h3>
-              <button id="report-generate-button" type="button" data-i18n="reportGenerate">Generate</button>
-            </div>
-            <p id="report-summary" data-i18n="reportEmpty">Generate a concise user-facing report from the current forecast.</p>
-            <dl id="report-metrics" class="report-metrics"></dl>
-            <div id="report-sections" class="report-sections"></div>
-            <p id="report-note" class="report-note"></p>
-          </section>
-
+        <aside class="insight-column">
           <section id="model-commentary-panel" class="model-commentary-panel">
             <div class="explanation-head">
               <h3 data-i18n="llmCommentary">AI 시황 해설</h3>
@@ -138,31 +114,49 @@
 
           <section id="market-context-panel" class="context-panel">
             <div class="explanation-head">
-              <h3 data-i18n="newsContext">뉴스와 시나리오</h3>
+              <h3 data-i18n="newsContext">뉴스 해석</h3>
               <span id="context-mode">-</span>
             </div>
             <p id="scenario-summary">-</p>
-            <div class="scenario-grid">
-              <div>
-                <span data-i18n="bull">상방</span>
-                <p id="scenario-bull">-</p>
-              </div>
-              <div>
-                <span data-i18n="base">기준</span>
-                <p id="scenario-base">-</p>
-              </div>
-              <div>
-                <span data-i18n="bear">하방</span>
-                <p id="scenario-bear">-</p>
-              </div>
-            </div>
             <div id="context-events" class="context-events"></div>
           </section>
         </aside>
+
+        <aside class="report-column">
+          <section id="forecast-report-panel" class="forecast-report-panel">
+            <div class="explanation-head">
+              <h3 data-i18n="reportTitle">Forecast Report</h3>
+              <button id="report-download-button" class="report-action-button" type="button" aria-label="PDF 저장" title="PDF 저장">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 3v12"></path>
+                  <path d="m7 10 5 5 5-5"></path>
+                  <path d="M5 21h14"></path>
+                </svg>
+              </button>
+            </div>
+            <p id="report-summary" data-i18n="reportEmpty">Generate a concise user-facing report from the current forecast.</p>
+            <dl id="report-metrics" class="report-metrics"></dl>
+            <div id="report-sections" class="report-sections"></div>
+          </section>
+        </aside>
       </div>
+
+      <section id="llm-chat-panel" class="llm-chat-panel">
+        <div class="explanation-head">
+          <h3 data-i18n="chatTitle">AI 시황 질문</h3>
+          <span data-i18n="chatScope">현재 종목/뉴스/모델 기준</span>
+        </div>
+        <div id="llm-chat-log" class="llm-chat-log">
+          <p data-i18n="chatEmpty">예측 결과나 시황에 대해 짧게 질문해보세요.</p>
+        </div>
+        <form id="llm-chat-form" class="llm-chat-form">
+          <input id="llm-chat-input" type="text" data-i18n-placeholder="chatPlaceholder" placeholder="예: 지금 상승 예측의 핵심 근거가 뭐야?" autocomplete="off" />
+          <button id="llm-chat-submit" type="button" data-i18n="chatAsk">질문</button>
+        </form>
+      </section>
     </main>
 
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="/static/main.js?v=20260603-report"></script>
+    <script src="/static/main.js?v=20260604-layout"></script>
   </body>
 </html>

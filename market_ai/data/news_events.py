@@ -12,6 +12,124 @@ from market_ai.data.storage import read_table
 NEWS_COLUMNS = ("published_at", "symbol", "headline", "body", "source", "url", "retrieved_at")
 
 
+BULLISH_OIL_TERMS = (
+    "supply cut",
+    "output cut",
+    "production cut",
+    "opec cut",
+    "deeper cut",
+    "extend cuts",
+    "inventory draw",
+    "crude draw",
+    "stockpile draw",
+    "drawdown",
+    "draws down",
+    "sanction",
+    "sanctions",
+    "embargo",
+    "disruption",
+    "supply disruption",
+    "outage",
+    "shutdown",
+    "shut down",
+    "attack",
+    "attacks",
+    "strike",
+    "strikes",
+    "war",
+    "conflict",
+    "tension",
+    "tensions",
+    "geopolitical",
+    "hormuz",
+    "red sea",
+    "middle east",
+    "iran",
+    "russia",
+    "ukraine",
+    "refinery fire",
+    "pipeline leak",
+    "shortage",
+    "tight supply",
+    "supply risk",
+    "supply fears",
+    "oil jumps",
+    "oil rallies",
+    "oil surges",
+    "prices jump",
+    "prices rally",
+    "prices surge",
+)
+
+BEARISH_OIL_TERMS = (
+    "inventory build",
+    "crude build",
+    "stockpile build",
+    "stockpiles rise",
+    "glut",
+    "surplus",
+    "oversupply",
+    "output boost",
+    "production rise",
+    "raises output",
+    "raise output",
+    "output hike",
+    "production hike",
+    "demand weak",
+    "weak demand",
+    "demand concerns",
+    "demand slowdown",
+    "slowing demand",
+    "china demand",
+    "recession",
+    "slowdown",
+    "ceasefire",
+    "peace deal",
+    "truce",
+    "oil falls",
+    "oil drops",
+    "oil slides",
+    "oil slumps",
+    "prices fall",
+    "prices drop",
+    "prices slide",
+    "prices slump",
+)
+
+HIGH_IMPACT_TERMS = (
+    "war",
+    "hormuz",
+    "red sea",
+    "sanction",
+    "sanctions",
+    "supply disruption",
+    "inventory draw",
+    "inventory build",
+    "opec cut",
+    "output cut",
+    "ceasefire",
+    "attack",
+    "strike",
+)
+
+GEOPOLITICAL_TERMS = (
+    "war",
+    "conflict",
+    "tension",
+    "tensions",
+    "geopolitical",
+    "hormuz",
+    "red sea",
+    "iran",
+    "russia",
+    "ukraine",
+    "sanction",
+    "sanctions",
+    "attack",
+    "strike",
+)
+
+
 def load_news_csv(path: str | Path) -> pd.DataFrame:
     frame = read_table(path)
     out = frame.copy()
@@ -36,17 +154,24 @@ def load_news_csv(path: str | Path) -> pd.DataFrame:
 
 def _local_rule_event_from_news(row: dict[str, Any]) -> MarketEvent:
     text = f"{row.get('headline', '')} {row.get('body', '')}".lower()
-    bullish_terms = ("supply cut", "draw", "sanction", "disruption", "attack", "opec cut", "inventory draw")
-    bearish_terms = ("build", "surplus", "demand weak", "recession", "inventory build", "production rise")
-    impact = 0.25
+    bullish_hits = sum(1 for term in BULLISH_OIL_TERMS if term in text)
+    bearish_hits = sum(1 for term in BEARISH_OIL_TERMS if term in text)
+    high_impact_hits = sum(1 for term in HIGH_IMPACT_TERMS if term in text)
+    impact = min(0.25 + 0.12 * max(bullish_hits, bearish_hits) + 0.08 * high_impact_hits, 0.85)
     bias = "neutral"
-    if any(term in text for term in bullish_terms):
+    if bullish_hits > bearish_hits:
         bias = "bullish"
-        impact = 0.55
-    if any(term in text for term in bearish_terms):
-        bias = "bearish" if bias == "neutral" else "mixed"
-        impact = max(impact, 0.55)
-    event_type = "energy_news" if any(term in text for term in ("oil", "crude", "opec", "inventory", "refinery")) else "macro_news"
+    elif bearish_hits > bullish_hits:
+        bias = "bearish"
+    elif bullish_hits and bearish_hits:
+        bias = "mixed"
+    event_type = (
+        "geopolitical_oil_news"
+        if any(term in text for term in GEOPOLITICAL_TERMS)
+        else "energy_news"
+        if any(term in text for term in ("oil", "crude", "opec", "inventory", "refinery", "brent", "wti"))
+        else "macro_news"
+    )
     return MarketEvent(
         timestamp=pd.Timestamp(row["published_at"]).to_pydatetime(),
         symbol=str(row.get("symbol") or "ALL"),

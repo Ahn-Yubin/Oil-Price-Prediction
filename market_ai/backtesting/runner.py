@@ -18,13 +18,17 @@ import yfinance as yf
 from market_ai.modeling.forecasters.neural_npz import forecast_with_global_model
 from market_ai.modeling.forecasters.baselines import ForecastContext, BASELINE_FORECASTERS
 from market_ai.modeling.forecasters.deep_fusion import forecast_with_deep_model
-from market_ai.config import PROJECT_DIR
+from market_ai.config import PROJECT_DIR, get_settings
 from market_ai.constants import (
     CONFIDENCE_Z,
     INTERVAL_TO_HORIZON,
     INTERVAL_TO_MAX_LOG_BAND,
     INTERVAL_TO_RETURN_CLIP,
+    select_model_horizon,
 )
+from market_ai.data.market_panel import load_market_panel
+from market_ai.modeling.deep.availability import deep_artifact_availability
+from market_ai.modeling.registry import metadata_for_artifact
 from market_ai.modeling.model_catalog import REMOVED_LEGACY_MODELS
 
 
@@ -38,6 +42,9 @@ BACKTEST_PERIOD_CANDIDATES = {
     "15m": ["60d", "30d", "14d"],
 }
 WINDOW_BY_INTERVAL = {"1d": 64, "1h": 96, "30m": 120, "15m": 144}
+ONLINE_RESIDUAL_WINDOW = 8
+ONLINE_RESIDUAL_GAIN = 2.0
+ONLINE_RESIDUAL_MAX_ABS_LOG = 0.18
 
 
 @dataclass(frozen=True)
@@ -76,7 +83,64 @@ def _normalize_yfinance_frame(data: pd.DataFrame) -> pd.DataFrame:
     return out[out["close"] > 0.0].reset_index(drop=True)
 
 
+def _processed_market_panel_path(interval: str) -> Path | None:
+    root = PROJECT_DIR / "data" / "processed" / "market_panel" / interval
+    for name in ("panel.parquet", "panel.csv"):
+        path = root / name
+        if path.exists():
+            return path
+    return None
+
+
+def _normalize_processed_panel_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    if "timestamp" in out.columns:
+        out["date"] = pd.to_datetime(out["timestamp"], errors="coerce", utc=True)
+    elif "date" in out.columns:
+        out["date"] = pd.to_datetime(out["date"], errors="coerce", utc=True)
+    else:
+        raise ValueError("processed market panel requires timestamp/date column")
+    keep = ["date", "open", "high", "low", "close", "volume"]
+    out = out[[col for col in keep if col in out.columns]].copy()
+    if "volume" not in out.columns:
+        out["volume"] = 0.0
+    for col in ["open", "high", "low", "close", "volume"]:
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+    out = out.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date").reset_index(drop=True)
+    return out[out["close"] > 0.0].reset_index(drop=True)
+
+
+def load_processed_candles(symbol: str, interval: str, start: str | None = None, end: str | None = None) -> pd.DataFrame:
+    path = _processed_market_panel_path(interval)
+    if path is None:
+        raise FileNotFoundError(f"No processed market panel found for {interval}")
+    panel = load_market_panel(path)
+    frame = panel[panel["symbol"].astype(str) == symbol].copy()
+    if frame.empty:
+        raise RuntimeError(f"Processed market panel {path.relative_to(PROJECT_DIR)} has no rows for {symbol}")
+    frame = _normalize_processed_panel_frame(frame)
+    if start:
+        start_ts = pd.Timestamp(start)
+        start_ts = start_ts.tz_localize("UTC") if start_ts.tzinfo is None else start_ts.tz_convert("UTC")
+        frame = frame[frame["date"] >= start_ts]
+    if end:
+        end_ts = pd.Timestamp(end)
+        end_ts = end_ts.tz_localize("UTC") if end_ts.tzinfo is None else end_ts.tz_convert("UTC")
+        frame = frame[frame["date"] < end_ts]
+    if frame.empty:
+        raise RuntimeError(f"Processed market panel has no rows for {symbol} {interval} in requested window")
+    frame.attrs["source"] = "processed_market_panel"
+    frame.attrs["source_path"] = str(path.relative_to(PROJECT_DIR))
+    return frame.reset_index(drop=True)
+
+
 def download_candles(symbol: str, interval: str, start: str | None = None, end: str | None = None) -> pd.DataFrame:
+    try:
+        frame = load_processed_candles(symbol, interval, start=start, end=end)
+        if len(frame) > INTERVAL_TO_HORIZON[interval] + 60:
+            return frame
+    except Exception:
+        pass
     if start or end:
         data = yf.download(symbol, start=start, end=end, interval=interval, auto_adjust=False, progress=False)
         if not data.empty:
@@ -371,6 +435,20 @@ def _quantile_paths_from_point(pred_path: np.ndarray, train_close: np.ndarray) -
     return {key: stacked[idx] for idx, key in enumerate(z)}
 
 
+def _online_residual_correction(
+    history: list[tuple[int, np.ndarray]],
+    origin: int,
+    horizon: int,
+) -> tuple[np.ndarray, int]:
+    eligible = [residual[:horizon] for available_origin, residual in history if available_origin <= origin and len(residual) >= horizon]
+    if len(eligible) < ONLINE_RESIDUAL_WINDOW:
+        return np.zeros(horizon, dtype=np.float64), 0
+    recent = np.vstack(eligible[-ONLINE_RESIDUAL_WINDOW:])
+    correction = ONLINE_RESIDUAL_GAIN * np.mean(recent, axis=0)
+    correction = np.clip(correction, -ONLINE_RESIDUAL_MAX_ABS_LOG, ONLINE_RESIDUAL_MAX_ABS_LOG)
+    return correction.astype(np.float64), int(len(recent))
+
+
 def _pinball(y_true: np.ndarray, y_pred: np.ndarray, quantile: float) -> float:
     diff = y_true - y_pred
     return float(np.mean(np.maximum(quantile * diff, (quantile - 1.0) * diff)))
@@ -424,6 +502,63 @@ def classify_regime(train_close: np.ndarray) -> str:
 
 def _eval_horizons(horizon: int) -> list[int]:
     return [h for h in DEFAULT_EVAL_HORIZONS if h <= horizon] or [horizon]
+
+
+def _candle_time(candles: pd.DataFrame | None, idx: int) -> pd.Timestamp | None:
+    if candles is None or candles.empty or idx < 0 or idx >= len(candles):
+        return None
+    frame = candles.reset_index(drop=True)
+    column = "date" if "date" in frame.columns else "timestamp" if "timestamp" in frame.columns else None
+    if column is None:
+        return None
+    value = pd.to_datetime(frame.loc[idx, column], errors="coerce", utc=True)
+    return value if pd.notna(value) else None
+
+
+def _iso_time(value: pd.Timestamp | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _deep_artifact_horizon(interval: str, display_horizon: int) -> int:
+    artifact_horizon, _ = select_model_horizon(interval, display_horizon)
+    return artifact_horizon
+
+
+def _deep_metadata_lookup(model_names: list[str], interval: str, horizon: int) -> dict[str, dict[str, Any]]:
+    settings = get_settings()
+    artifact_horizon = _deep_artifact_horizon(interval, horizon)
+    out: dict[str, dict[str, Any]] = {}
+    for name in model_names:
+        if name not in DEEP_MODEL_NAMES:
+            continue
+        try:
+            availability = deep_artifact_availability(settings=settings, model_name=name, interval=interval, horizon=artifact_horizon)
+            if not availability.is_available or availability.artifact_path is None:
+                continue
+            metadata = metadata_for_artifact(availability.artifact_path, metadata_dir=settings.metadata_dir)
+        except Exception:
+            continue
+        out[name] = {
+            "artifact_file": metadata.artifact_file,
+            "training_cutoff": metadata.training_cutoff,
+            "train_start": metadata.train_start,
+            "train_end": metadata.train_end,
+            "n_train": metadata.n_train,
+            "n_val": metadata.n_val,
+            "n_test": metadata.n_test,
+        }
+    return out
+
+
+def _leakage_audit_status(origin_time: pd.Timestamp | None, metadata: dict[str, Any] | None) -> str:
+    if origin_time is None:
+        return "origin_time_unavailable"
+    if not metadata or not metadata.get("training_cutoff"):
+        return "benchmark_or_metadata_unavailable"
+    cutoff = pd.to_datetime(metadata.get("training_cutoff"), errors="coerce", utc=True)
+    if pd.isna(cutoff):
+        return "training_cutoff_unavailable"
+    return "post_artifact_cutoff" if origin_time > cutoff else "overlaps_artifact_sample_window"
 
 
 def backtest(
@@ -506,6 +641,9 @@ def run_rolling_backtest(
     horizon_rows: list[dict] = []
     probabilistic_rows: list[dict] = []
     sample_rows: list[dict] = []
+    metadata_lookup = _deep_metadata_lookup(model_names, interval, horizon)
+    deep_artifact_horizon = _deep_artifact_horizon(interval, horizon)
+    residual_history: dict[str, list[tuple[int, np.ndarray]]] = {name: [] for name in model_names}
 
     del expanding  # current models are inference-only; expanding is equivalent to using all history up to origin.
     for origin in origins:
@@ -516,40 +654,66 @@ def run_rolling_backtest(
         actual = close[origin + 1 : origin + 1 + horizon]
         actual_path = np.log(actual / base)
         regime = classify_regime(train_close) if include_regime_breakdown else "all"
+        origin_time = _candle_time(candles, origin)
+        train_start_time = _candle_time(candles, train_start)
+        actual_end_time = _candle_time(candles, origin + horizon)
 
         for name in model_names:
             fn = FORECASTERS[name]
+            metadata = metadata_lookup.get(name)
+            audit_status = _leakage_audit_status(origin_time, metadata)
+            audit_fields = {
+                "origin_time": _iso_time(origin_time),
+                "train_window_start": _iso_time(train_start_time),
+                "actual_window_end": _iso_time(actual_end_time),
+                "artifact_training_cutoff": metadata.get("training_cutoff") if metadata else None,
+                "artifact_train_start": metadata.get("train_start") if metadata else None,
+                "artifact_train_end": metadata.get("train_end") if metadata else None,
+                "leakage_audit_status": audit_status,
+            }
             try:
                 if name in DEEP_MODEL_NAMES:
                     model = forecast_with_deep_model(
                         model_name=name,
                         close=train_close,
                         interval=interval,
-                        horizon=horizon,
+                        horizon=deep_artifact_horizon,
                         symbol=symbol,
                         candles=train_candles,
                     )
                     pred_path = np.asarray(np.log(np.asarray(model["values"], dtype=np.float64) / base)[:horizon], dtype=np.float64)
+                elif name == "pattern_mlp":
+                    pred_path = np.asarray(fn(train_close, interval, deep_artifact_horizon).cum_log_path[:horizon], dtype=np.float64)
                 else:
                     pred_path = np.asarray(fn(train_close, interval, horizon).cum_log_path[:horizon], dtype=np.float64)
             except Exception as exc:
-                summary_rows.append({"model": name, "origin": origin, "regime": regime, "error": str(exc)})
+                summary_rows.append({"model": name, "origin": origin, "regime": regime, **audit_fields, "error": str(exc)})
                 continue
             if len(pred_path) < horizon:
                 pred_path = np.pad(pred_path, (0, horizon - len(pred_path)), constant_values=float(pred_path[-1]) if len(pred_path) else 0.0)
+            online_calibration_samples = 0
+            if name in DEEP_MODEL_NAMES and audit_status == "post_artifact_cutoff":
+                correction, online_calibration_samples = _online_residual_correction(residual_history.get(name, []), origin, horizon)
+                pred_path = pred_path + correction
 
             pred_price = base * np.exp(pred_path)
             metric = point_metrics(pred_price, actual, train_close)
-            summary_rows.append({"model": name, "origin": origin, "regime": regime, **metric})
+            calibration_fields = {
+                "online_residual_calibration": bool(online_calibration_samples),
+                "online_residual_samples": online_calibration_samples,
+            }
+            summary_rows.append({"model": name, "origin": origin, "regime": regime, **audit_fields, **calibration_fields, **metric})
 
             quantile_paths = _quantile_paths_from_point(pred_path, train_close)
-            probabilistic_rows.append({"model": name, "origin": origin, "regime": regime, **probabilistic_metrics(quantile_paths, actual_path)})
+            probabilistic_rows.append(
+                {"model": name, "origin": origin, "regime": regime, **audit_fields, **calibration_fields, **probabilistic_metrics(quantile_paths, actual_path)}
+            )
 
             for h in _eval_horizons(horizon):
                 h_pred_price = pred_price[:h]
                 h_actual = actual[:h]
                 h_metrics = point_metrics(h_pred_price, h_actual, train_close)
-                horizon_rows.append({"model": name, "origin": origin, "horizon": h, "regime": regime, **h_metrics})
+                horizon_rows.append({"model": name, "origin": origin, "horizon": h, "regime": regime, **audit_fields, **calibration_fields, **h_metrics})
 
             for step_idx, (p_log, a_log) in enumerate(zip(pred_path, actual_path), start=1):
                 row = {
@@ -557,10 +721,12 @@ def run_rolling_backtest(
                     "origin": origin,
                     "step": step_idx,
                     "regime": regime,
+                    **audit_fields,
                     "pred_log_return": float(p_log),
                     "actual_log_return": float(a_log),
                     "pred_price": float(base * np.exp(p_log)),
                     "actual_price": float(base * np.exp(a_log)),
+                    **calibration_fields,
                 }
                 for key, path in quantile_paths.items():
                     row[f"{key}_log_return"] = float(path[step_idx - 1])
@@ -568,6 +734,8 @@ def run_rolling_backtest(
                 details_rows.append(row)
                 if origin == origins[-1]:
                     sample_rows.append(row)
+            if len(actual_path) >= horizon and (name not in DEEP_MODEL_NAMES or audit_status == "post_artifact_cutoff"):
+                residual_history.setdefault(name, []).append((origin + horizon, np.asarray(actual_path[:horizon] - pred_path[:horizon], dtype=np.float64)))
 
     details = pd.DataFrame(details_rows)
     summary_source = pd.DataFrame(summary_rows)
@@ -591,6 +759,17 @@ def run_rolling_backtest(
         if not ok_summary.empty
         else pd.DataFrame()
     )
+    if not summary.empty and "leakage_audit_status" in ok_summary.columns:
+        audit = (
+            ok_summary.groupby("model", as_index=False)
+            .agg(
+                origin_start=("origin_time", "min"),
+                origin_end=("origin_time", "max"),
+                post_cutoff_origins=("leakage_audit_status", lambda values: int((values == "post_artifact_cutoff").sum())),
+                overlap_origins=("leakage_audit_status", lambda values: int((values == "overlaps_artifact_sample_window").sum())),
+            )
+        )
+        summary = summary.merge(audit, on="model", how="left")
     probabilistic = (
         probabilistic_source.groupby("model", as_index=False)
         .agg(
@@ -756,7 +935,7 @@ def main() -> None:
     plot_dir.mkdir(parents=True, exist_ok=True)
     intervals = [args.interval] if args.interval else ["1d", "1h"]
     model_names = [m.strip() for m in args.models.split(",") if m.strip()]
-    removed = [m for m in model_names if m in REMOVED_LEGACY_MODELS]
+    removed = [m for m in model_names if m in REMOVED_LEGACY_MODELS and m not in FORECASTERS]
     if removed:
         raise SystemExit(
             f"Removed/deprecated model(s): {removed}. "
@@ -805,6 +984,17 @@ def main() -> None:
             plot_path = plot_sample_paths(outputs["sample"], args.symbol, interval)
             if plot_path is not None and plot_path.parent != plot_dir:
                 plot_path.replace(plot_dir / plot_path.name)
+        run_meta.setdefault("data_sources", {})[interval] = {
+            "source": candles.attrs.get("source", "yfinance"),
+            "path": candles.attrs.get("source_path"),
+            "rows": int(len(candles)),
+            "first_date": _iso_time(_candle_time(candles, 0)),
+            "last_date": _iso_time(_candle_time(candles, len(candles) - 1)),
+            "horizon": int(horizon),
+            "lookback": int(lookback),
+            "step": int(step),
+            "max_origins": int(max_origins),
+        }
         summary = outputs["summary"].copy()
         leaderboard = outputs["leaderboard"].copy()
         for frame in [summary, leaderboard]:

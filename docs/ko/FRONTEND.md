@@ -13,11 +13,11 @@ Frontend는 WTI 유가(`CL=F`) 전용 TradingView Lightweight Charts 스타일�
 
 UI는 `/api/forecast`를 우선 호출하고, 필요한 경우 `/api/chart` compatibility payload를 사용합니다. `/api/chart`는 기존 overlay와 호환되어야 합니다.
 
-오른쪽 context panel은 `/api/market-context`를 호출합니다. 차트에서 과거 candle을 선택해 backtest를 실행하면 `/api/backtests/visualization`을 호출합니다. 화면 하단 commentary panel은 `/api/model-commentary`를 호출합니다.
+데스크톱 화면은 3컬럼 구조입니다. 왼쪽은 차트, 가운데는 `/api/model-commentary`와 `/api/market-context`를 호출하는 AI 시황 해설/뉴스 해석, 오른쪽은 예측 리포트입니다. 차트에서 과거 candle을 선택해 backtest를 실행하면 `/api/backtests/visualization`을 호출합니다.
 
 - `news`: 최근 headline과 source
 - `context_points`: chart marker로 표시할 이벤트/context 날짜
-- `scenario_commentary`: bull/base/bear 시나리오 해설
+- `scenario_commentary`: backend compatibility field. 화면에서는 bull/base/bear 카드 대신 뉴스와 LLM 해석만 표시합니다.
 - `llm_context_summary`: LLM context 사용 여부와 상태
 
 Backtest visualization payload는 `/api/chart`와 같은 기본 chart key에 다음 field를 추가합니다.
@@ -35,11 +35,10 @@ Model commentary payload는 단일 운영 모델의 forecast path를 바탕으�
 - `CL=F` historical candles
 - forecast p50 path
 - p10/p90 또는 p05/p95 band
-- bull/base/bear scenario summary
 - 과거 뉴스/context marker
-- event/context card list
+- 뉴스 headline과 해당 뉴스/이벤트에 대한 LLM 해석 card list
 - 선택 origin 이후 실제 candle의 반투명 overlay
-- 하단 full-width 모델 예측 해설
+- 가운데 AI 시황 해설/뉴스 해석 panel과 오른쪽 예측 리포트 panel
 
 Marker는 뉴스/event가 있는 날짜 근처에 표시합니다. LLM이 숫자 가격을 예측한 marker가 아니라, 해당 날짜에 어떤 context가 있었는지 설명하는 marker입니다.
 
@@ -52,6 +51,7 @@ Marker는 뉴스/event가 있는 날짜 근처에 표시합니다. LLM이 숫자
 - `/api/forecast`, `/api/chart`, `/api/market-context`, `/api/model-commentary`, `/api/backtests/visualization` 호출에 같은 horizon 값을 전달합니다.
 - 차트 높이는 460px 기준으로 줄여 화면 전체 이동 스크롤이 더 잘 동작하게 했습니다.
 - 오른쪽 context event list의 독립 내부 스크롤을 제거해 페이지 스크롤과 충돌하지 않게 했습니다.
+- 뉴스 panel은 잡다한 scenario 설명 없이 뉴스 headline과 LLM 해석만 보여줍니다.
 - Backtest를 실행할 때는 기존 차트 time scale과 price scale을 최대한 유지합니다.
 
 ## UX 원칙
