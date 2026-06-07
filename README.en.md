@@ -28,9 +28,13 @@ Main APIs:
 - `GET /api/data-status?symbol=CL=F&interval=1d`
 - `GET /api/forecast?symbol=CL=F&interval=1d`
 - `GET /api/chart?symbol=CL=F&interval=1d`
+- `GET /api/dashboard-analysis?symbol=CL=F&interval=1d&horizon=30`
 - `GET /api/market-context?symbol=CL=F&interval=1d`
 - `GET /api/explanation`
 - `GET /api/backtests`
+- `GET /api/backtests/visualization`
+
+The operating dashboard shows a fixed `CL=F / 1D / 30-day` path and marks the 1W/2W/1M endpoints on the same h30 output. AI market commentary, news interpretation, and the forecast report are rendered from one external LLM response returned by `/api/dashboard-analysis`.
 
 ## Current Data
 

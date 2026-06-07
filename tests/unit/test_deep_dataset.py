@@ -116,7 +116,14 @@ def test_deep_dataset_aggregates_event_context_over_lookback_without_future_rows
     )
 
     latest = dataset.samples[-1].x_event_context
-    assert np.isclose(latest[0], -0.6)
-    assert np.isclose(latest[2], 0.25)
-    assert np.isclose(latest[3], 0.9)
+    end_ts = pd.Timestamp(dataset.samples[-1].as_of_time)
+    end_ts = end_ts.tz_localize("UTC") if end_ts.tzinfo is None else end_ts.tz_convert("UTC")
+    event_dates = pd.to_datetime(["2020-01-22T00:00:00Z", "2020-01-25T00:00:00Z"])
+    recency = np.asarray(np.exp(-((end_ts - event_dates).total_seconds() / 86_400.0) / 14.0), dtype=float)
+    weights = np.array([0.2, 0.8]) * recency
+    expected_bias = ((np.array([1.0, -1.0]) * weights).sum()) / weights.sum()
+    expected_uncertainty = ((np.array([0.1, 0.4]) * weights).sum()) / weights.sum()
+    assert np.isclose(latest[0], expected_bias)
+    assert np.isclose(latest[2], expected_uncertainty)
+    assert np.isclose(latest[3], recency.max())
     assert np.isclose(latest[4], 3.0)

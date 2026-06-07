@@ -61,6 +61,64 @@ def _actual_future_candles(candles: list[Candle], origin_idx: int, horizon: int)
     return [candle.model_dump() for candle in candles[origin_idx + 1 : end_idx]]
 
 
+def _turn_count(values: list[float]) -> int:
+    diffs = []
+    previous = None
+    for value in values:
+        if previous is not None:
+            diff = value - previous
+            if diff:
+                diffs.append(1 if diff > 0.0 else -1)
+        previous = value
+    if len(diffs) < 2:
+        return 0
+    return sum(1 for left, right in zip(diffs, diffs[1:]) if left != right)
+
+
+def _path_shape_summary(pred_values: list[float], actual_values: list[float]) -> dict[str, Any]:
+    if len(pred_values) != len(actual_values) or not pred_values:
+        return {
+            "final_ape_pct": None,
+            "step_directional_accuracy": None,
+            "pred_turns": None,
+            "actual_turns": None,
+            "turn_error": None,
+            "range_ratio": None,
+            "shape_score": None,
+        }
+    final_ape = abs(pred_values[-1] - actual_values[-1]) / max(abs(actual_values[-1]), 1e-8) * 100.0
+    pred_turns = _turn_count(pred_values)
+    actual_turns = _turn_count(actual_values)
+    pred_range = max(pred_values) - min(pred_values)
+    actual_range = max(actual_values) - min(actual_values)
+    range_ratio = pred_range / max(actual_range, 1e-8)
+    turn_error = abs(pred_turns - actual_turns) / max(actual_turns, 1)
+    if len(pred_values) > 1:
+        direction_matches = []
+        for pred_left, pred_right, actual_left, actual_right in zip(pred_values, pred_values[1:], actual_values, actual_values[1:]):
+            direction_matches.append(math.copysign(1.0, pred_right - pred_left) == math.copysign(1.0, actual_right - actual_left))
+        step_direction = sum(direction_matches) / len(direction_matches)
+    else:
+        step_direction = None
+    direction_component = step_direction if step_direction is not None else 0.0
+    shape_score = max(
+        0.0,
+        100.0
+        - 45.0 * min(turn_error, 2.0)
+        - 35.0 * min(abs(math.log(max(range_ratio, 1e-6))), 2.0)
+        + 20.0 * direction_component,
+    )
+    return {
+        "final_ape_pct": final_ape,
+        "step_directional_accuracy": step_direction,
+        "pred_turns": pred_turns,
+        "actual_turns": actual_turns,
+        "turn_error": turn_error,
+        "range_ratio": range_ratio,
+        "shape_score": shape_score,
+    }
+
+
 def _backtest_metric_summary(payload: dict[str, Any], actual_future: list[dict[str, Any]]) -> dict[str, Any]:
     predicted = payload.get("predicted") or []
     pred_values = [float(point["value"]) for point in predicted[1 : len(actual_future) + 1] if point.get("value") is not None]
@@ -79,6 +137,7 @@ def _backtest_metric_summary(payload: dict[str, Any], actual_future: list[dict[s
         "metric_mode": "backtest",
         "metric_label": "Backtest origin metrics",
         "metric_samples": len(actual_values),
+        **_path_shape_summary(pred_values, actual_values),
     }
 
 
@@ -294,16 +353,20 @@ def backtest_visualization(
 
     origin_candle = candles[origin_idx]
     payload = chart_payload_from_forecast(bundle)
-    online_calibration = _apply_online_residual_calibration(
-        payload=payload,
-        full_market=full_market,
-        candles=candles,
-        origin_idx=origin_idx,
-        requested_symbol=requested_symbol,
-        requested_interval=requested_interval,
-        horizon=bundle.horizon,
-        models=models,
-        settings=current_settings,
+    online_calibration = (
+        _apply_online_residual_calibration(
+            payload=payload,
+            full_market=full_market,
+            candles=candles,
+            origin_idx=origin_idx,
+            requested_symbol=requested_symbol,
+            requested_interval=requested_interval,
+            horizon=bundle.horizon,
+            models=models,
+            settings=current_settings,
+        )
+        if current_settings.enable_online_residual_calibration
+        else {"applied": False, "reason": "disabled", "samples": 0}
     )
     actual_future = _actual_future_candles(candles, origin_idx, bundle.horizon)
     payload["metrics"] = {

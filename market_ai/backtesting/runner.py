@@ -396,6 +396,54 @@ def _mase_denominator(train_close: np.ndarray) -> float:
     return max(denom, 1e-8)
 
 
+def _price_shape_metrics(pred_price: np.ndarray, actual_price: np.ndarray) -> dict[str, float]:
+    pred_price = np.asarray(pred_price, dtype=np.float64)
+    actual_price = np.asarray(actual_price, dtype=np.float64)
+    mask = np.isfinite(pred_price) & np.isfinite(actual_price) & (actual_price > 0.0)
+    pred = pred_price[mask]
+    actual = actual_price[mask]
+    if len(pred) == 0:
+        return {
+            "mape": float("nan"),
+            "final_ape_pct": float("nan"),
+            "step_directional_accuracy": float("nan"),
+            "pred_turns": float("nan"),
+            "actual_turns": float("nan"),
+            "turn_error": float("nan"),
+            "range_ratio": float("nan"),
+            "shape_score": float("nan"),
+        }
+    ape = np.abs(pred - actual) / np.maximum(np.abs(actual), 1e-8)
+    pred_turns = _turn_count(pred)
+    actual_turns = _turn_count(actual)
+    actual_range = float(np.max(actual) - np.min(actual))
+    pred_range = float(np.max(pred) - np.min(pred))
+    range_ratio = pred_range / max(actual_range, 1e-8)
+    turn_error = abs(pred_turns - actual_turns) / max(actual_turns, 1)
+    step_direction = (
+        float(np.mean(np.sign(np.diff(pred)) == np.sign(np.diff(actual))))
+        if len(pred) > 1
+        else float("nan")
+    )
+    shape_score = max(
+        0.0,
+        100.0
+        - 45.0 * min(turn_error, 2.0)
+        - 35.0 * min(abs(np.log(max(range_ratio, 1e-6))), 2.0)
+        + 20.0 * (step_direction if np.isfinite(step_direction) else 0.0),
+    )
+    return {
+        "mape": float(np.mean(ape) * 100.0),
+        "final_ape_pct": float(ape[-1] * 100.0),
+        "step_directional_accuracy": step_direction,
+        "pred_turns": float(pred_turns),
+        "actual_turns": float(actual_turns),
+        "turn_error": float(turn_error),
+        "range_ratio": float(range_ratio),
+        "shape_score": float(shape_score),
+    }
+
+
 def point_metrics(pred_price: np.ndarray, actual_price: np.ndarray, train_close: np.ndarray) -> dict[str, float]:
     pred_price = np.asarray(pred_price, dtype=np.float64)
     actual_price = np.asarray(actual_price, dtype=np.float64)
@@ -414,6 +462,7 @@ def point_metrics(pred_price: np.ndarray, actual_price: np.ndarray, train_close:
         "mase": float(np.mean(abs_err) / _mase_denominator(train_close)),
         "median_absolute_error": float(np.median(abs_err)),
         "directional_accuracy": direction,
+        **_price_shape_metrics(pred_price, actual_price),
     }
 
 
@@ -749,12 +798,20 @@ def run_rolling_backtest(
             origins=("origin", "nunique"),
             mae=("mae", "mean"),
             rmse=("rmse", "mean"),
+            mape=("mape", "mean"),
             smape=("smape", "mean"),
             mase=("mase", "mean"),
             median_absolute_error=("median_absolute_error", "mean"),
             directional_accuracy=("directional_accuracy", "mean"),
+            step_directional_accuracy=("step_directional_accuracy", "mean"),
+            final_ape_pct=("final_ape_pct", "mean"),
+            pred_turns=("pred_turns", "mean"),
+            actual_turns=("actual_turns", "mean"),
+            turn_error=("turn_error", "mean"),
+            range_ratio=("range_ratio", "mean"),
+            shape_score=("shape_score", "mean"),
         )
-        .sort_values(["rmse", "mae"], ascending=[True, True])
+        .sort_values(["mape", "shape_score", "rmse"], ascending=[True, False, True])
         .reset_index(drop=True)
         if not ok_summary.empty
         else pd.DataFrame()
@@ -790,12 +847,20 @@ def run_rolling_backtest(
         .agg(
             mae=("mae", "mean"),
             rmse=("rmse", "mean"),
+            mape=("mape", "mean"),
             smape=("smape", "mean"),
             mase=("mase", "mean"),
             median_absolute_error=("median_absolute_error", "mean"),
             directional_accuracy=("directional_accuracy", "mean"),
+            step_directional_accuracy=("step_directional_accuracy", "mean"),
+            final_ape_pct=("final_ape_pct", "mean"),
+            pred_turns=("pred_turns", "mean"),
+            actual_turns=("actual_turns", "mean"),
+            turn_error=("turn_error", "mean"),
+            range_ratio=("range_ratio", "mean"),
+            shape_score=("shape_score", "mean"),
         )
-        .sort_values(["horizon", "rmse", "mae"], ascending=[True, True, True])
+        .sort_values(["horizon", "mape", "shape_score"], ascending=[True, True, False])
         .reset_index(drop=True)
         if not horizon_source.empty
         else pd.DataFrame()
@@ -806,10 +871,14 @@ def run_rolling_backtest(
             origins=("origin", "nunique"),
             mae=("mae", "mean"),
             rmse=("rmse", "mean"),
+            mape=("mape", "mean"),
             smape=("smape", "mean"),
             directional_accuracy=("directional_accuracy", "mean"),
+            step_directional_accuracy=("step_directional_accuracy", "mean"),
+            range_ratio=("range_ratio", "mean"),
+            shape_score=("shape_score", "mean"),
         )
-        .sort_values(["regime", "rmse"], ascending=[True, True])
+        .sort_values(["regime", "mape", "shape_score"], ascending=[True, True, False])
         .reset_index(drop=True)
         if include_regime_breakdown and not ok_summary.empty
         else pd.DataFrame()
@@ -831,8 +900,12 @@ def run_rolling_backtest(
     leaderboard = summary.copy()
     if not leaderboard.empty and not probabilistic.empty:
         leaderboard = leaderboard.merge(probabilistic[["model", "pinball_loss", "coverage_80", "winkler_80"]], on="model", how="left")
-        leaderboard["rank_score"] = leaderboard["rmse"].rank(method="min") + leaderboard["pinball_loss"].rank(method="min")
-        leaderboard = leaderboard.sort_values(["rank_score", "rmse"], ascending=[True, True]).reset_index(drop=True)
+        leaderboard["rank_score"] = (
+            leaderboard["mape"].rank(method="min")
+            + leaderboard["pinball_loss"].rank(method="min")
+            + leaderboard["shape_score"].rank(method="min", ascending=False)
+        )
+        leaderboard = leaderboard.sort_values(["rank_score", "mape", "shape_score"], ascending=[True, True, False]).reset_index(drop=True)
 
     return {
         "summary": summary,

@@ -183,6 +183,8 @@ class ModelMetadata(BaseModel):
     artifact_file: str
     interval: str | None = None
     created_at: str | None = None
+    sample_start: str | None = None
+    sample_end: str | None = None
     train_start: str | None = None
     train_end: str | None = None
     training_cutoff: str | None = None

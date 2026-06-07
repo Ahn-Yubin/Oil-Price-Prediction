@@ -4,37 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Oil Price Forecast Dashboard</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20260604-commentary-tones" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=20260608-chat-glass-context-dedupe" />
   </head>
   <body>
     <main class="wrap">
       <section class="header">
         <h1 data-i18n="appTitle">유가 예측 대시보드</h1>
-        <label class="language-toggle" aria-label="Language">
+        <label class="language-toggle language-mode-toggle" aria-label="Language">
           <span>KO</span>
           <input id="language-toggle" type="checkbox" role="switch" aria-label="Language" />
           <span class="language-slider" aria-hidden="true"></span>
           <span>EN</span>
         </label>
-      </section>
-
-      <section class="controls">
-        <input id="symbol-input" type="hidden" value="CL=F" />
-        <div class="fixed-symbol" aria-label="Fixed forecast symbol">
-          <span data-i18n="oilInstrument">WTI 원유</span>
-          <strong>CL=F</strong>
-        </div>
-        <label for="interval-input" data-i18n="interval">주기</label>
-        <select id="interval-input">
-          <option value="1d" selected>1D</option>
-          <option value="1h">1H</option>
-        </select>
-        <label for="horizon-input" data-i18n="horizon">예측 길이</label>
-        <select id="horizon-input">
-          <option value="7" selected>7</option>
-          <option value="14">14</option>
-          <option value="30">30</option>
-        </select>
       </section>
       <section id="status-banner" class="status-banner hidden"></section>
       <section id="info-banner" class="info-banner hidden"></section>
@@ -58,9 +39,6 @@
               </div>
               <div class="chart-meta">
                 <span id="data-status-badge" class="data-status-badge">데이터 -</span>
-                <span id="calibration-badge" class="data-status-badge">밴드 -</span>
-                <span id="confidence-badge" class="data-status-badge">신뢰도 -</span>
-                <span id="regime-badge" class="data-status-badge">국면 -</span>
                 <p id="chart-updated-value">업데이트 -</p>
               </div>
             </div>
@@ -68,6 +46,7 @@
               <div id="tv-legend" class="tv-legend"></div>
               <div id="oilChart"></div>
               <div id="chart-data-warning" class="chart-data-warning hidden"></div>
+              <div id="forecast-segment-legend" class="forecast-segment-legend" aria-label="Forecast horizon segments"></div>
               <div id="chart-loading-overlay" class="chart-loading-overlay hidden">
                 <span class="loading-dot"></span>
                 <span id="chart-loading-message">차트 데이터 불러오는 중</span>
@@ -109,6 +88,19 @@
             </div>
           </section>
 
+          <section id="llm-chat-panel" class="llm-chat-panel">
+            <div class="explanation-head">
+              <h3 data-i18n="chatTitle">AI에게 묻기</h3>
+              <span data-i18n="chatScope">현재 종목/뉴스/모델 기준</span>
+            </div>
+            <div id="llm-chat-log" class="llm-chat-log">
+              <p data-i18n="chatEmpty">예측 결과나 시황에 대해 짧게 질문해보세요.</p>
+            </div>
+            <form id="llm-chat-form" class="llm-chat-form">
+              <input id="llm-chat-input" type="text" data-i18n-placeholder="chatPlaceholder" placeholder="예: 지금 상승 예측의 핵심 근거가 뭐야?" autocomplete="off" />
+              <button id="llm-chat-submit" type="submit" data-i18n="chatAsk">전송</button>
+            </form>
+          </section>
         </div>
 
         <aside class="insight-column">
@@ -149,23 +141,9 @@
           </section>
         </aside>
       </div>
-
-      <section id="llm-chat-panel" class="llm-chat-panel">
-        <div class="explanation-head">
-          <h3 data-i18n="chatTitle">AI 시황 질문</h3>
-          <span data-i18n="chatScope">현재 종목/뉴스/모델 기준</span>
-        </div>
-        <div id="llm-chat-log" class="llm-chat-log">
-          <p data-i18n="chatEmpty">예측 결과나 시황에 대해 짧게 질문해보세요.</p>
-        </div>
-        <form id="llm-chat-form" class="llm-chat-form">
-          <input id="llm-chat-input" type="text" data-i18n-placeholder="chatPlaceholder" placeholder="예: 지금 상승 예측의 핵심 근거가 뭐야?" autocomplete="off" />
-          <button id="llm-chat-submit" type="button" data-i18n="chatAsk">질문</button>
-        </form>
-      </section>
     </main>
 
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="/static/main.js?v=20260604-commentary-tones"></script>
+    <script src="/static/main.js?v=20260608-chat-glass-context-dedupe"></script>
   </body>
 </html>

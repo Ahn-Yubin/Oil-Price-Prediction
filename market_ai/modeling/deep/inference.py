@@ -68,6 +68,12 @@ def predict_deep_quantiles(
         raise RuntimeError("Not enough candles for deep model inference")
     sample = dataset.samples[-1]
     tensors = dataset.tensors([len(dataset.samples) - 1])
+    expected_event_dim = int(getattr(model, "event_context_dim", tensors["x_event_context"].shape[-1]))
+    if tensors["x_event_context"].shape[-1] != expected_event_dim:
+        aligned = np.zeros((tensors["x_event_context"].shape[0], expected_event_dim), dtype=np.float32)
+        copy_dim = min(expected_event_dim, tensors["x_event_context"].shape[-1])
+        aligned[:, :copy_dim] = tensors["x_event_context"][:, :copy_dim]
+        tensors["x_event_context"] = aligned
     resolved_device = torch.device(device)
     model = model.to(resolved_device)
     with torch.no_grad():

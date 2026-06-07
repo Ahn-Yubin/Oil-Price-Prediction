@@ -12,11 +12,12 @@ The API preserves compatibility with the existing chart frontend while exposing 
 | `GET /api/forecast?symbol=CL=F&interval=1d` | candles, quantile forecast, scenarios, regime, model metadata |
 | `GET /api/chart?symbol=CL=F&interval=1d&horizon=7` | legacy chart payload; backward-compatibility target |
 | `GET /api/market-context?symbol=CL=F&interval=1d` | news, context markers, scenario commentary |
+| `GET /api/dashboard-analysis?symbol=CL=F&interval=1d` | generates AI commentary, news interpretation, and forecast report with one external LLM call |
 | `GET /api/features` | feature information |
 | `GET /api/explanation` | forecast and optional LLM context explanation |
 | `GET /api/backtests` | backtest output lookup |
 | `GET /api/backtests/visualization` | chart backtest overlay payload from a historical origin |
-| `GET /api/model-commentary` | LLM/fallback commentary over the single operational model forecast path |
+| `GET /api/model-commentary` | compatibility endpoint for standalone market commentary |
 
 ## `/api/chart`
 
@@ -36,7 +37,7 @@ Supported query parameters:
 
 - `symbol`
 - `interval`
-- `horizon`: optional. If omitted, the interval default horizon of 30 steps is used. The frontend sends one of 7, 14, or 30. The backend runs the h30 artifact and returns the requested leading segment.
+- `horizon`: optional. If omitted, the interval default horizon of 30 steps is used. The current dashboard uses a fixed 30-day view and displays 1-week, 2-week, and 1-month segment markers. The backend runs the h30 artifact and returns a leading slice when a shorter horizon is requested.
 - `models`: optional model selector
 
 ## `/api/forecast`
@@ -72,6 +73,31 @@ Example:
 curl "http://127.0.0.1:8000/api/market-context?symbol=CL=F&interval=1d&models=oil_context_fusion"
 ```
 
+## `/api/dashboard-analysis`
+
+This is the combined endpoint for the dashboard's three AI panels. Instead of having the frontend call `/api/model-commentary`, `/api/market-context`, and `/api/report` separately, the server bundles the same forecast and news evidence, makes one external LLM request, and returns panel-specific payloads.
+
+Returned content:
+
+- `commentary`: payload for the AI market commentary panel
+- `market_context`: payload for the news interpretation panel, including translated headlines and public context explanations
+- `report`: payload for the forecast report panel
+- `warnings`: warnings from combined generation
+- `llm_used`: whether an external LLM was used
+
+Main query parameters:
+
+- `symbol`, `interval`, `models`, `horizon`, `language`
+- `origin_time`: optional. When present, output is written as a point-in-time backtest report from that origin and avoids live relative wording such as current, recent, now, or today.
+
+This endpoint still does not use the LLM as a numeric forecaster. Numeric values and paths come only from the forecast payload; the LLM writes prose and interprets news. The frontend uses request ids and payload keys to ignore stale responses and clears panel/marker state before language switches or backtest-origin changes so old news markers cannot leak onto the chart.
+
+Example:
+
+```bash
+curl "http://127.0.0.1:8000/api/dashboard-analysis?symbol=CL=F&interval=1d&models=oil_context_fusion&horizon=30&language=en"
+```
+
 ## `/api/backtests/visualization`
 
 This endpoint builds a point-in-time forecast from the historical origin selected on the chart and returns the realized candles that followed that origin in the same payload. The `/api/chart` contract is unchanged; backtest-specific fields are additive and isolated to this endpoint.
@@ -99,7 +125,7 @@ curl "http://127.0.0.1:8000/api/backtests/visualization?symbol=CL=F&interval=1d&
 
 ## `/api/model-commentary`
 
-This endpoint turns the already-produced `oil_context_fusion` forecast path into analyst-style market commentary. The LLM must not create new price targets or return paths; it explains why the path leans that way using news, chart action, regime state, supply/macro context, and risks. If external LLM calls are disabled or fail, the endpoint returns deterministic fallback commentary from the same inputs.
+This compatibility endpoint turns the already-produced `oil_context_fusion` forecast path into analyst-style market commentary. The new dashboard prefers `/api/dashboard-analysis` to reduce external LLM calls. The LLM must not create new price targets or return paths; it explains why the path leans that way using news, chart action, regime state, supply/macro context, and risks. If external LLM calls are disabled or fail, the endpoint returns deterministic fallback commentary from the same inputs.
 
 Main query parameters:
 

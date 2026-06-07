@@ -10,21 +10,21 @@ SUPPORTED_FORECAST_INTERVALS = {"1d", "1h"}
 SUPPORTED_DISPLAY_HORIZONS = (7, 14, 30)
 MAX_MODEL_HORIZON = 30
 INTERVAL_TO_MODEL_HORIZONS = {
-    "1d": (8, 14, 30),
+    "1d": (30,),
     "1h": (30,),
     "30m": (30,),
     "15m": (30,),
 }
 
 INTERVAL_TO_PERIOD = {
-    "1d": "2y",
+    "1d": "10y",
     "1h": "180d",
     "30m": "60d",
     "15m": "30d",
 }
 
 INTERVAL_TO_PERIOD_CANDIDATES = {
-    "1d": ["2y", "1y", "6mo"],
+    "1d": ["10y", "5y", "2y"],
     "1h": ["180d", "120d", "90d"],
     "30m": ["60d", "30d", "14d"],
     "15m": ["60d", "30d", "14d"],

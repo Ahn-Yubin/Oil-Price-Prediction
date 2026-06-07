@@ -6,10 +6,10 @@
 
 1. Google Gemma/Gemini LLM 연결을 live로 검증합니다.
 2. `data/raw/news/public_market_news.csv`를 기반으로 live LLM event context를 재생성합니다.
-3. `oil_context_fusion`을 1D/1H h30으로 재학습하고 7/14/30 표시 길이를 검증합니다.
+3. `oil_context_fusion` 1D h30 운영 artifact를 재학습하고 고정 30일 경로와 1주/2주/한달 endpoint 표시를 검증합니다.
 4. CME settlement/curve CSV를 확보해 `cme_curve_daily.csv`를 생성합니다.
 5. Rolling backtest와 quantile calibration을 실행합니다.
-6. `/api/market-context`와 frontend marker/panel을 실제 차트에서 검증합니다.
+6. `/api/dashboard-analysis`, `/api/market-context`, frontend marker/panel을 실제 차트에서 검증합니다.
 
 ## 데이터 확장
 

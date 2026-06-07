@@ -8,8 +8,8 @@ from market_ai.data.symbols import infer_asset_class, normalize_symbol
 
 
 DEFAULT_RELATED_ASSETS: dict[str, list[str]] = {
-    "CL=F": ["BZ=F", "DX-Y.NYB", "GC=F", "NG=F", "^GSPC", "^VIX", "XLE"],
-    "BZ=F": ["CL=F", "DX-Y.NYB", "GC=F", "NG=F", "^GSPC", "^VIX", "XLE"],
+    "CL=F": ["BZ=F", "NG=F", "RB=F", "HO=F", "USO", "XLE", "DX-Y.NYB", "GC=F", "^GSPC", "^VIX", "SPY", "QQQ"],
+    "BZ=F": ["CL=F", "NG=F", "RB=F", "HO=F", "USO", "XLE", "DX-Y.NYB", "GC=F", "^GSPC", "^VIX", "SPY", "QQQ"],
     "BTC-USD": ["ETH-USD", "^IXIC", "GC=F", "DX-Y.NYB", "^VIX"],
 }
 

@@ -15,7 +15,7 @@ from market_ai.data.providers.public_news_provider import (
     normalize_public_news,
 )
 from market_ai.features.context_features import EVENT_CONTEXT_DIM
-from market_ai.llm.context_builder import encoder_for_mode
+from market_ai.llm.context_builder import encoder_for_mode, raw_news_pool_features
 from market_ai.schemas.deep_learning import EventContextVector
 from market_ai.schemas.llm_context import LLMContextOutput, MarketContextInput, RawNewsItem
 
@@ -168,6 +168,7 @@ def _context_row(
     encoded: LLMContextOutput,
     news_count: int,
     warnings: list[str],
+    raw_features: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     embedding = list(encoded.event_embedding or [])
     if len(embedding) < EVENT_CONTEXT_DIM:
@@ -188,6 +189,8 @@ def _context_row(
     }
     for idx, name in enumerate(vector_names):
         row[name] = float(embedding[idx]) if idx < len(embedding) else 0.0
+    for name, value in (raw_features or {}).items():
+        row[name] = float(value)
     return row
 
 
@@ -210,7 +213,7 @@ def build_live_event_context(
         model=settings.llm_model if mode != "local_http" else settings.local_llm_model,
         live=bool(settings.enable_llm_context and settings.enable_external_llm_calls),
     )
-    news_items = _raw_news_items(news)
+    news_items = _raw_news_items(news, limit=min(16, max(1, int(news_limit))))
     encoded = encoder.encode_events(
         MarketContextInput(
             symbol=symbol,
@@ -225,6 +228,11 @@ def build_live_event_context(
         mode=mode,
         encoded=encoded,
         news_count=len(news_items),
+        raw_features=raw_news_pool_features(
+            provider.load_events(),
+            as_of_time=resolved_as_of,
+            selected_news_count=len(news_items),
+        ),
         warnings=fetch_warnings,
     )
     return {

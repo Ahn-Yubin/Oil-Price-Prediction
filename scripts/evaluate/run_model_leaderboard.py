@@ -37,7 +37,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     created = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    output_dir = Path(args.output_root) / created
+    output_root = Path(args.output_root)
+    if not output_root.is_absolute():
+        output_root = PROJECT_DIR / output_root
+    output_dir = output_root / created
     output_dir.mkdir(parents=True, exist_ok=True)
     symbols = [item.strip() for item in args.symbols.split(",") if item.strip()]
     models = [item.strip() for item in args.models.split(",") if item.strip()]
@@ -101,7 +104,7 @@ def main() -> None:
     }
     (output_dir / "summary.md").write_text(_summary_md(summary, all_frames), encoding="utf-8")
     (output_dir / "run_meta.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    latest_path = Path(args.output_root) / "latest.json"
+    latest_path = output_root / "latest.json"
     latest_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

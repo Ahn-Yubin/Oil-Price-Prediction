@@ -20,6 +20,20 @@ class EventContextVector(BaseModel):
     energy_event_score: float = 0.0
     geopolitical_event_score: float = 0.0
     source_quality_score: float = 0.0
+    news_volume_1d: float = 0.0
+    news_volume_3d: float = 0.0
+    news_volume_7d: float = 0.0
+    news_volume_30d: float = 0.0
+    news_selection_coverage: float = 0.0
+    raw_bullish_pressure: float = 0.0
+    raw_bearish_pressure: float = 0.0
+    raw_net_pressure: float = 0.0
+    raw_energy_pressure: float = 0.0
+    raw_geopolitical_pressure: float = 0.0
+    raw_macro_pressure: float = 0.0
+    raw_supply_pressure: float = 0.0
+    raw_demand_pressure: float = 0.0
+    source_diversity_score: float = 0.0
 
     @field_validator("*")
     @classmethod

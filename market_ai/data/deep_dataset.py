@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from market_ai.data.event_providers import FileEventProvider, NullEventProvider
+from market_ai.data.related_assets import get_related_assets
 from market_ai.features.deep_features import (
     CROSS_ASSET_FEATURE_COLUMNS,
     DEEP_FEATURE_VERSION,
@@ -147,6 +148,10 @@ def _first_numeric(row: pd.Series, candidates: tuple[str, ...], default: float =
     return default
 
 
+def _context_symbol_set(symbol: str) -> set[str]:
+    return {symbol.upper(), "ALL", "*", *(item.upper() for item in get_related_assets(symbol))}
+
+
 def _build_auxiliary_cross_asset_matrix(frame: pd.DataFrame, symbol: str, auxiliary_frame: pd.DataFrame | None) -> np.ndarray:
     if auxiliary_frame is None or auxiliary_frame.empty:
         return empty_cross_asset_window(len(frame))
@@ -231,8 +236,7 @@ def _event_context_frame_vector(
     if frame is None or frame.empty:
         return None
     if "symbol" in frame.columns:
-        symbol_upper = symbol.upper()
-        frame = frame[frame["symbol"].astype(str).str.upper().isin([symbol_upper, "ALL", "*"])]
+        frame = frame[frame["symbol"].astype(str).str.upper().isin(_context_symbol_set(symbol))]
     if frame.empty:
         return None
     ts = pd.Timestamp(as_of_time).tz_convert("UTC") if pd.Timestamp(as_of_time).tzinfo else pd.Timestamp(as_of_time, tz="UTC")
@@ -259,8 +263,7 @@ def _event_context_frame_window_vector(
     if frame is None or frame.empty:
         return None
     if "symbol" in frame.columns:
-        symbol_upper = symbol.upper()
-        frame = frame[frame["symbol"].astype(str).str.upper().isin([symbol_upper, "ALL", "*"])]
+        frame = frame[frame["symbol"].astype(str).str.upper().isin(_context_symbol_set(symbol))]
     if frame.empty:
         return None
     start_ts = pd.Timestamp(start_time).tz_convert("UTC") if pd.Timestamp(start_time).tzinfo else pd.Timestamp(start_time, tz="UTC")
@@ -275,19 +278,24 @@ def _event_context_frame_window_vector(
         )
     names = list(EventContextVector.model_fields)
     weight_col = "impact_strength" if "impact_strength" in window.columns else "impact_score" if "impact_score" in window.columns else ""
+    age_days = (end_ts - window["feature_available_at"]).dt.total_seconds().clip(lower=0.0) / 86_400.0
+    recency = np.exp(-age_days / 14.0).clip(lower=0.02)
     if weight_col:
         weights = pd.to_numeric(window[weight_col], errors="coerce").fillna(1.0).clip(lower=0.05)
     else:
         weights = pd.Series(1.0, index=window.index, dtype=float)
+    weights = weights * recency.to_numpy(dtype=float)
     values: list[float] = []
     for name in names:
         series = pd.to_numeric(window[name], errors="coerce").fillna(0.0) if name in window.columns else pd.Series(0.0, index=window.index)
         if name.startswith("event_count"):
             values.append(float(np.clip(series.sum(), 0.0, 12.0)))
         elif name == "uncertainty":
-            values.append(float(np.clip(series.tail(20).mean(), 0.0, 1.0)))
+            recent = series.tail(20)
+            recent_weights = weights.tail(20) if hasattr(weights, "tail") else pd.Series(weights[-len(recent) :], index=recent.index)
+            values.append(float(np.clip((recent * recent_weights).sum() / max(float(recent_weights.sum()), 1e-8), 0.0, 1.0)))
         elif name == "time_decay":
-            values.append(float(np.clip(series.max(), 0.0, 1.0)))
+            values.append(float(np.clip(recency.max(), 0.0, 1.0)))
         else:
             weighted = float((series * weights).sum() / max(float(weights.sum()), 1e-8))
             values.append(weighted)
@@ -364,7 +372,7 @@ def build_deep_dataset_from_frame(
         recent = returns_by_bar[max(1, origin - 60 + 1) : origin + 1]
         recent_vol = max(float(np.std(recent)) if len(recent) > 1 else 0.0, 1e-8)
         future_log_path = log_close[origin + 1 : origin + horizon + 1] - log_close[origin]
-        scaled_target = np.clip(future_log_path / recent_vol, -12.0, 12.0).astype(np.float32)
+        scaled_target = np.clip(future_log_path / recent_vol, -36.0, 36.0).astype(np.float32)
         future_returns = returns_by_bar[origin + 1 : origin + horizon + 1]
         as_of_time = pd.Timestamp(frame.loc[origin, "date"]).to_pydatetime()
         window_start_time = pd.Timestamp(frame.loc[origin - lookback + 1, "date"]).to_pydatetime()

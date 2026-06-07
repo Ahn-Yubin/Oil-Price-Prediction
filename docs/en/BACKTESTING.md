@@ -10,9 +10,10 @@ The chart backtest mode uses the historical candle selected by the user as the f
 2. The last candle at or before `origin_time` becomes the origin.
 3. The model receives only candles up to that origin.
 4. The forecast path is generated for the selected `horizon`.
-5. If the origin is after the artifact cutoff and at least 8 prior origins already have realized outcomes, online residual calibration is applied. This correction uses only previously realized forecast errors and never uses realized values after the current origin.
-6. Realized candles after the origin are returned as `actual_future_candles` and rendered as translucent candles.
-7. MAE, RMSE, and MAPE compare forecast prices and realized closes step by step.
+5. The 1D `oil_context_fusion` path passes through a path adapter that uses only origin-time price state and event/context vectors. The adapter type is recorded under `deep_model_info.oil_context_fusion.path_adapter`.
+6. Online residual calibration is disabled by default. It is applied only when `ENABLE_ONLINE_RESIDUAL_CALIBRATION=true`, and even then it may use only prior forecast residuals whose outcomes were already known before the current origin.
+7. Realized candles after the origin are returned as `actual_future_candles` and rendered as translucent candles.
+8. MAE, RMSE, and MAPE compare forecast prices and realized closes step by step.
 
 This UI is a single point-in-time visualization. Use the walk-forward leaderboard below to judge model-level performance.
 
@@ -62,9 +63,9 @@ Leakage controls:
 - Event context is aggregated only over the lookback window ending at the origin.
 - Future candles are used only as `actual_future_candles` and metric targets.
 - Random splits are not used. Deep learning datasets use chronological train/validation/test splits.
-- Online residual calibration is enabled only for `post_artifact_cutoff` origins. It uses only prior forecast residuals whose realized horizon ended at or before `origin - horizon`; if fewer than 8 prior residuals are available, no correction is applied.
+- Online residual calibration is disabled by default. If explicitly enabled, it runs only for `post_artifact_cutoff` origins and uses only prior forecast residuals whose realized horizon ended at or before `origin - horizon`; if fewer than 8 prior residuals are available, no correction is applied.
 
-There is one metadata caveat. Current deep artifact metadata fields named `train_end` and `training_cutoff` are recorded from the full sample range, not only the training split. The actual split is still chronological and represented by `n_train`, `n_val`, and `n_test`. Backtest outputs therefore include `origin_time`, `actual_window_end`, `artifact_training_cutoff`, and `leakage_audit_status` so the reader can see whether each origin overlaps the artifact sample range.
+Deep artifact metadata records the full sample range (`sample_start`, `sample_end`) separately from the actual training cutoff (`train_end`, `training_cutoff`). Backtest outputs include `origin_time`, `actual_window_end`, `artifact_training_cutoff`, and `leakage_audit_status` so the reader can see how each origin relates to the artifact training window.
 
 `leakage_audit_status` values:
 
@@ -78,10 +79,16 @@ The leaderboard records:
 
 - `mae`: mean absolute price error
 - `rmse`: price error with larger misses weighted more heavily
+- `mape`: mean absolute percentage error across the full forecast path, step by step. It is not an endpoint-only metric.
 - `smape`: symmetric percentage error
 - `mase`: error relative to naive historical movement
 - `median_absolute_error`: median absolute error
 - `directional_accuracy`: path direction agreement
+- `final_ape_pct`: absolute percentage error at the last step
+- `step_directional_accuracy`: agreement of each step-return direction
+- `pred_turns`, `actual_turns`, `turn_error`: predicted/realized turning-point counts and their difference
+- `range_ratio`: predicted path range relative to realized path range
+- `shape_score`: path-shape score combining direction, turn count, and range ratio
 - `pinball_loss`: quantile forecast quality
 - `coverage_80`, `coverage_90`: realized values inside P10-P90 and P05-P95 bands
 - `winkler_80`: interval width plus miss penalty
@@ -111,23 +118,36 @@ Batch leaderboards write the same structure under `outputs/backtests/leaderboard
 
 ## Current Interpretation
 
-The current `oil_context_fusion_1d_h30` artifact metadata has a sample range ending on 2026-03-26. The local processed 1D panel ends on 2026-05-08, so the latest origin with a full 30-day realized future is also around 2026-03-26. That means the current 30-day backtest is useful for checking rolling mechanics and relative model behavior, but it is not yet a broad post-cutoff out-of-sample validation.
+After the 2026-06-05 update, the current reference 1D artifact is `oil_context_fusion_1d_h30`. The dashboard displays a fixed 30-day path, and the 1-week, 2-week, and 1-month labels are endpoint markers on the same h30 output. The artifact uses CL=F event context encoded by the external LLM and is saved from a chronological holdout split rather than a final-fit-all-data run, so overfitting can be inspected.
 
-Key metrics rerun on 2026-06-04 with the local processed panel:
+Important distinction:
 
-| Window | Model | Origins | MAE | RMSE | MAPE | sMAPE | Interpretation |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| 7 days | oil_context_fusion | 12 | 6.11 | 6.97 | 6.67% | 6.71% | 7 origins overlap the artifact sample range and only 5 origins are post-cutoff. |
-| 7 days, post-cutoff only | oil_context_fusion | 5 | 7.59 | 8.46 | 7.77% | 7.46% | The current data does not reach a 5% MAPE target. |
-| 30 days | oil_context_fusion | 8 | 11.05 | 13.57 | 12.21% | 13.65% | All origins overlap the artifact sample range. |
+- Current artifact metadata records `sample_start`, `sample_end`, `train_end`, and `training_cutoff` separately.
+- Dashboard MAPE is the average step-by-step error across the full forecast path. It is not an endpoint-only error.
+- Online residual calibration is disabled by default. It helped the 2026-02 jump origin but worsened other origins, so using it by default would blur model evaluation.
 
-Live yfinance data was separately checked through 2026-06-04 for CL=F 1D data, but the current artifact still did not reliably reach 5% MAPE during the late-May 2026 rally. Online residual calibration can reduce some high-error origins, but it can also worsen origins that are already near 6-7%, so it is bounded and requires at least 8 prior residuals. Claiming “5% MAPE achieved” at this point would be an overfitting or leakage-prone interpretation.
+Key metrics from the 2026-06-05 metadata and local processed panel/LLM event context:
+
+| Window | Origins | MAPE | Range Ratio | Shape Score | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Validation holdout | 353 | 5.45% | 1.32 | 90.5 | Average chronological holdout performance. RMSE is 5.42. |
+| Test holdout | 353 | 6.93% | 1.26 | 87.6 | Average performance on the later split. RMSE is 8.02. |
+| 2025-08-14, 30-day display | 1 | 2.26% | 2.01 | 73.8 | The p50 path follows this range/downside setup reasonably well. |
+| 2025-11-04, 30-day display | 1 | 3.58% | 0.89 | 91.1 | The predicted range and turning behavior are close to realized movement. |
+| 2026-02-17, 30-day display | 1 | 23.99% | 0.14 | 37.0 | Problem window with a future event-driven jump after the origin. |
+| 2026-02-18, 30-day display | 1 | 21.77% | 0.15 | 36.8 | The p50 median path does not track the realized event jump. |
+
+This update changes model training and evaluation rather than decorating the displayed path. `oil_context_fusion` now includes an event-shock expert and auxiliary shock/range heads. The loss function also optimizes p50 step returns, detrended path shape, path range, step volatility, curvature, and step direction. The chart's representative line is the learned p50 path without inference-time post-processing.
+
+The 2026-02-17/18 origins need separate interpretation. At the origin, price was still in the 60s; within the next 30 days, realized price jumped into the 90s. That jump depended on events that unfolded after the origin. Without future news or future prices as input, a p50 median path cannot honestly forecast that realized path at roughly 5% MAPE.
+
+There are two ways to make that window look like a 5% MAPE forecast: leak future prices/news, or add origin-specific post-processing. Both are overfitting risks, so they are not part of the default model or backtest. The principled next step is to represent this as event-jump probability and scenario bands, not as a p50 line pretending it knew the future.
 
 For stricter validation, use one of these approaches:
 
-1. Add newer realized price data so enough post-cutoff origins exist.
-2. Freeze an artifact at an earlier cutoff and evaluate only the later period.
-3. Introduce rolling retrain or expanding retrain so each origin trains a fresh artifact using only pre-origin data.
+1. Freeze an artifact at an earlier cutoff and evaluate only the later period.
+2. Introduce rolling retrain or expanding retrain so each origin trains a fresh artifact using only pre-origin data.
+3. Track deployable final-fit performance and walk-forward out-of-sample performance in separate tables.
 
 ## Calibration
 

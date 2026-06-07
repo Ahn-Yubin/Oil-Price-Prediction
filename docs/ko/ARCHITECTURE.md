@@ -39,7 +39,7 @@ provider raw data
 
 ## LLM 흐름
 
-LLM은 `market_ai.llm` 내부에서 context encoder로만 쓰입니다.
+LLM은 `market_ai.llm` 내부에서 context encoder로 쓰이고, backend의 dashboard analysis route에서 이미 계산된 forecast/news evidence를 설명하는 prose generator로 쓰입니다.
 
 ```text
 news/events
@@ -55,6 +55,8 @@ LLM은 numeric forecast path를 생성하지 않습니다.
 - `/api/forecast`: 신규 typed forecast contract
 - `/api/chart`: 기존 chart compatibility contract
 - `/api/market-context`: 뉴스/context marker와 scenario commentary
+- `/api/dashboard-analysis`: AI 시황 해설, 뉴스 해석, 예측 리포트를 한 번의 외부 LLM 호출로 생성
+- `/api/backtests/visualization`: 과거 origin 기준 forecast overlay와 실제 이후 candle
 - `/api/explanation`: forecast explanation
 - `/api/models`, `/api/data-status`, `/api/backtests`: 운영/진단 endpoint
 

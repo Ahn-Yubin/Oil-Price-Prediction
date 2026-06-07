@@ -12,11 +12,12 @@ API는 기존 chart frontend와의 호환성을 유지하면서 신규 forecast/
 | `GET /api/forecast?symbol=CL=F&interval=1d` | candle, quantile forecast, scenario, regime, model metadata |
 | `GET /api/chart?symbol=CL=F&interval=1d&horizon=7` | 기존 chart payload. backward compatibility 대상 |
 | `GET /api/market-context?symbol=CL=F&interval=1d` | 뉴스, context marker, scenario commentary |
+| `GET /api/dashboard-analysis?symbol=CL=F&interval=1d` | AI 시황 해설, 뉴스 해석, 예측 리포트를 한 번의 외부 LLM 호출로 생성 |
 | `GET /api/features` | feature 관련 정보 |
 | `GET /api/explanation` | forecast와 optional LLM context 기반 설명 |
 | `GET /api/backtests` | backtest output 조회 |
 | `GET /api/backtests/visualization` | 과거 origin 기준 chart backtest overlay payload |
-| `GET /api/model-commentary` | 단일 운영 모델 예측 경로에 대한 LLM/fallback 해설 |
+| `GET /api/model-commentary` | 개별 시황 해설 호환 endpoint |
 
 ## `/api/chart`
 
@@ -36,7 +37,7 @@ API는 기존 chart frontend와의 호환성을 유지하면서 신규 forecast/
 
 - `symbol`
 - `interval`
-- `horizon`: optional. 지정하지 않으면 interval 기본 horizon인 30스텝을 씁니다. 프론트엔드는 7, 14, 30 중 하나를 전달합니다. 내부 모델은 h30 artifact를 실행하고 요청한 길이만큼 앞부분을 잘라 응답합니다.
+- `horizon`: optional. 지정하지 않으면 interval 기본 horizon인 30스텝을 씁니다. 현재 dashboard는 30일 고정 화면을 쓰고 1주/2주/한달 구간 표시만 나눕니다. 내부 모델은 h30 artifact를 실행하고 요청 길이가 더 짧으면 앞부분을 잘라 응답합니다.
 - `models`: optional model selector
 
 ## `/api/forecast`
@@ -72,6 +73,31 @@ LLM이 숫자 가격을 예측하지 않습니다. 이 endpoint의 해설은 for
 curl "http://127.0.0.1:8000/api/market-context?symbol=CL=F&interval=1d&models=oil_context_fusion"
 ```
 
+## `/api/dashboard-analysis`
+
+Dashboard의 세 AI 패널을 위한 통합 endpoint입니다. 기존처럼 `/api/model-commentary`, `/api/market-context`, `/api/report`를 화면에서 따로 호출하지 않고, 서버가 같은 forecast와 news evidence를 묶어 외부 LLM에 한 번 요청한 뒤 아래 payload를 나눠 반환합니다.
+
+반환 내용:
+
+- `commentary`: AI 시황 해설 패널 payload
+- `market_context`: 뉴스 해석 패널 payload. LLM 번역 headline과 공개용 context 설명만 포함합니다.
+- `report`: 예측 리포트 패널 payload
+- `warnings`: 통합 생성 중 발생한 경고
+- `llm_used`: 외부 LLM 사용 여부
+
+주요 query:
+
+- `symbol`, `interval`, `models`, `horizon`, `language`
+- `origin_time`: optional. 백테스트 기준점이 있으면 해당 시점 기준의 point-in-time 해설로 작성하며, “현재/최근/지금” 같은 live 표현 대신 절대 날짜와 시간을 사용합니다.
+
+이 endpoint의 LLM도 숫자 예측기를 대신하지 않습니다. 숫자와 예측 경로는 이미 계산된 forecast payload에서만 가져오며, LLM은 문장 생성과 뉴스 해석만 담당합니다. Frontend는 request id와 payload key로 stale response를 무시하고, 언어 전환/백테스트 origin 변경 중 오래된 뉴스 marker가 차트에 섞이지 않도록 패널과 marker를 먼저 비웁니다.
+
+예시:
+
+```bash
+curl "http://127.0.0.1:8000/api/dashboard-analysis?symbol=CL=F&interval=1d&models=oil_context_fusion&horizon=30&language=ko"
+```
+
 ## `/api/backtests/visualization`
 
 차트에서 선택한 과거 시점을 기준으로 point-in-time forecast를 만들고, 같은 payload 안에 실제 이후 캔들을 함께 반환합니다. `/api/chart` contract는 변경하지 않고, 이 endpoint에만 backtest용 additive field를 둡니다.
@@ -99,7 +125,7 @@ curl "http://127.0.0.1:8000/api/backtests/visualization?symbol=CL=F&interval=1d&
 
 ## `/api/model-commentary`
 
-단일 운영 모델 `oil_context_fusion`이 이미 낸 forecast path를 바탕으로 LLM이 애널리스트식 시황 해설을 작성합니다. LLM은 새 가격 target이나 새 return path를 만들지 않고, 뉴스, 차트 흐름, 국면, 수급/거시 리스크를 근거로 “왜 이런 방향으로 보는지”만 설명합니다. 외부 LLM 호출이 꺼져 있거나 실패하면 같은 입력을 사용한 deterministic fallback을 반환합니다.
+단일 운영 모델 `oil_context_fusion`이 이미 낸 forecast path를 바탕으로 애널리스트식 시황 해설을 작성하는 개별 호환 endpoint입니다. 신규 dashboard 화면은 LLM 호출 수를 줄이기 위해 `/api/dashboard-analysis`를 우선 사용합니다. LLM은 새 가격 target이나 새 return path를 만들지 않고, 뉴스, 차트 흐름, 국면, 수급/거시 리스크를 근거로 “왜 이런 방향으로 보는지”만 설명합니다. 외부 LLM 호출이 꺼져 있거나 실패하면 같은 입력을 사용한 deterministic fallback을 반환합니다.
 
 주요 query:
 

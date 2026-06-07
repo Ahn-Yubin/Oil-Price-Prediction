@@ -4,7 +4,6 @@ from market_ai.config import Settings
 from market_ai.modeling.deep.artifacts import save_deep_artifact, write_deep_metadata
 from market_ai.modeling.deep.lstm_tcn_fusion import DeepLstmTcnFusion
 from market_ai.modeling.deep.oil_context_fusion import OilContextFusion
-from market_ai.modeling.forecasters import deep_fusion
 from market_ai.modeling.forecasters.deep_fusion import forecast_with_deep_model
 
 
@@ -63,6 +62,7 @@ def test_deep_forecaster_adapter_loads_oil_context_fusion_extra_metadata(tmp_pat
     )
     assert out["id"] == "oil_context_fusion"
     assert len(out["values"]) == 3
+    assert out["point_path_kind"] == "p50_shape_trained"
     assert "motif" in out["metadata"]["deep_config"]["expert_names"]
 
 
@@ -104,7 +104,7 @@ def test_deep_forecaster_respects_artifact_event_context_flag(tmp_path, monkeypa
             "metadata": metadata,
         }
 
-    monkeypatch.setattr(deep_fusion, "predict_deep_quantiles", fake_predict)
+    monkeypatch.setattr("market_ai.modeling.forecasters.deep_fusion.predict_deep_quantiles", fake_predict)
     forecast_with_deep_model(
         model_name="deep_lstm_tcn_fusion",
         close=close,

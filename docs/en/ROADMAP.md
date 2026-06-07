@@ -6,10 +6,10 @@ The project is stabilizing a WTI oil forecasting-only model and dashboard. The c
 
 1. Validate the Google Gemma/Gemini LLM connection live.
 2. Regenerate live LLM event context from `data/raw/news/public_market_news.csv`.
-3. Retrain `oil_context_fusion` for 1D/1H h30 and validate 7/14/30 display lengths.
+3. Retrain the `oil_context_fusion` 1D h30 operating artifact and validate the fixed 30-day path with 1W/2W/1M endpoint markers.
 4. Acquire CME settlement/curve CSV and build `cme_curve_daily.csv`.
 5. Run rolling backtests and quantile calibration.
-6. Validate `/api/market-context` and frontend markers/panels on the actual chart.
+6. Validate `/api/dashboard-analysis`, `/api/market-context`, and frontend markers/panels on the actual chart.
 
 ## Data Expansion
 

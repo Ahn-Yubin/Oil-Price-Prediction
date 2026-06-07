@@ -32,7 +32,8 @@ class OilContextFusion(nn.Module):
         self.horizon = int(horizon)
         self.hidden_dim = int(hidden_dim)
         self.dropout = float(dropout)
-        self.expert_names = ("lstm", "tcn", "attention", "context", "pattern", "motif")
+        self.base_expert_names = ("lstm", "tcn", "attention", "context", "pattern", "motif")
+        self.expert_names = (*self.base_expert_names, "event_shock")
 
         self.price_projection = nn.Linear(self.price_feature_dim, hidden_dim)
         self.cross_projection = nn.Linear(max(self.cross_asset_dim, 1), hidden_dim)
@@ -54,18 +55,21 @@ class OilContextFusion(nn.Module):
         self.motif_projection = MLP(sequence_dim, hidden_dim, hidden_dim, dropout=dropout)
 
         q_dim = self.horizon * len(QUANTILE_LEVELS)
-        expert_input_dim = hidden_dim * len(self.expert_names)
+        expert_input_dim = hidden_dim * len(self.base_expert_names)
         self.lstm_head = MLP(hidden_dim, hidden_dim, q_dim, dropout=dropout)
         self.tcn_head = MLP(hidden_dim, hidden_dim, q_dim, dropout=dropout)
         self.attention_head = MLP(hidden_dim, hidden_dim, q_dim, dropout=dropout)
         self.context_head = MLP(expert_input_dim, hidden_dim, q_dim, dropout=dropout)
         self.pattern_head = MLP(hidden_dim, hidden_dim, q_dim, dropout=dropout)
         self.motif_head = MLP(hidden_dim, hidden_dim, q_dim, dropout=dropout)
+        self.event_shock_head = MLP(hidden_dim * 2 + context_dim, hidden_dim, q_dim, dropout=dropout)
         self.gating_network = MLP(expert_input_dim + context_dim, hidden_dim, len(self.expert_names), dropout=dropout)
 
         shared_dim = hidden_dim * 5 + context_dim
         self.direction_head = MLP(shared_dim, hidden_dim, self.horizon, dropout=dropout)
         self.volatility_head = MLP(shared_dim, hidden_dim, self.horizon, dropout=dropout)
+        self.path_range_head = MLP(shared_dim, hidden_dim, 1, dropout=dropout)
+        self.shock_head = MLP(shared_dim, hidden_dim, 1, dropout=dropout)
         self.confidence_head = MLP(hidden_dim + context_dim, hidden_dim, 1, dropout=dropout)
 
     def config_dict(self) -> dict[str, int | float | list[str]]:
@@ -140,6 +144,7 @@ class OilContextFusion(nn.Module):
                 self.context_head(expert_input).view(batch, self.horizon, q_dim),
                 self.pattern_head(pattern_repr).view(batch, self.horizon, q_dim),
                 self.motif_head(motif_repr).view(batch, self.horizon, q_dim),
+                self.event_shock_head(torch.cat([context_repr, pattern_repr, context], dim=-1)).view(batch, self.horizon, q_dim),
             ],
             dim=1,
         )
@@ -150,6 +155,8 @@ class OilContextFusion(nn.Module):
         shared = torch.cat([lstm_repr, tcn_repr, attention_repr, pattern_repr, motif_repr, context], dim=-1)
         prob_up = torch.sigmoid(self.direction_head(shared))
         expected_volatility = F.softplus(self.volatility_head(shared)) + 1e-6
+        expected_path_range = F.softplus(self.path_range_head(shared)) + 1e-6
+        shock_probability = torch.sigmoid(self.shock_head(shared))
         confidence = torch.sigmoid(self.confidence_head(torch.cat([context_repr, context], dim=-1)))
         event_uncertainty = x_event_context[:, 2:3] if self.event_context_dim >= 3 else 0.0
         confidence = torch.clamp(confidence * (1.0 - 0.30 * event_uncertainty), 0.0, 1.0)
@@ -158,6 +165,8 @@ class OilContextFusion(nn.Module):
             "quantiles": quantiles,
             "prob_up": prob_up,
             "expected_volatility": expected_volatility,
+            "expected_path_range": expected_path_range,
+            "shock_probability": shock_probability,
             "confidence": confidence,
             "expert_weights": expert_weights,
             "expert_names": self.expert_names,

@@ -8,17 +8,21 @@ let predBandFillRef = null;
 let predBandMaskRef = null;
 let predTailFillRef = null;
 let predTailMaskRef = null;
+let forecastSegmentSeriesRefs = new Map();
 let backtestActualSeriesRef = null;
 let forecastModelSeriesRefs = new Map();
 let createLineSeriesRef = null;
 let isResizeBound = false;
 let isCrosshairBound = false;
 let isClickBound = false;
+let chartResizeObserver = null;
 let activeDataKey = null;
 let latestPayload = null;
+let latestLivePayload = null;
 let predictedByTime = new Map();
 let forecastByTime = new Map();
 let requestVersion = 0;
+let backtestRequestVersion = 0;
 let modelCatalog = new Map();
 let latestContextPayload = null;
 let latestCommentaryPayload = null;
@@ -26,24 +30,48 @@ let latestReportPayload = null;
 let selectedBacktestTime = null;
 let activeBacktestOriginMarker = null;
 let activeBacktestPayload = null;
+let chartMode = "live";
 let currentLanguage = "ko";
 let lastContextKey = "";
 let lastContextLoadMs = 0;
 let lastCommentaryKey = "";
 let lastCommentaryLoadMs = 0;
 let lastReportKey = "";
+let lastAnalysisKey = "";
+let lastAnalysisLoadMs = 0;
 let chartRequestInFlight = false;
 let contextRequestInFlight = false;
 let commentaryRequestInFlight = false;
 let commentaryRequestVersion = 0;
 let reportRequestInFlight = false;
 let reportRequestVersion = 0;
+let analysisRequestInFlight = false;
+let analysisRequestVersion = 0;
+let activeAnalysisRequestId = 0;
+let pendingAnalysisRefresh = null;
+let latestAnalysisPayloadKey = "";
 let loadingState = { chart: false, context: false, commentary: false, backtest: false, report: false };
+let lastChartUpdatedAt = null;
+let chatRequestInFlight = false;
 
 const CONTEXT_REFRESH_MS = 300_000;
 const COMMENTARY_REFRESH_MS = 600_000;
+const DASHBOARD_ANALYSIS_REFRESH_MS = 600_000;
 const PRICE_REFRESH_MS = 90_000;
 const DEFAULT_SYMBOL = "CL=F";
+const DEFAULT_INTERVAL = "1d";
+const DEFAULT_HORIZON = 30;
+const FORECAST_CONTEXT_MARKER_LIMIT = 8;
+const FORECAST_SEGMENTS = [
+  { id: "week1", start: 1, end: 7, color: "#34d399", labelKey: "forecastWeek1" },
+  { id: "week2", start: 8, end: 14, color: "#a78bfa", labelKey: "forecastWeek2" },
+  { id: "month", start: 15, end: 30, color: "#58a6ff", labelKey: "forecastMonth" },
+];
+
+const NON_PUBLIC_CONTEXT_PATTERNS = [
+  /deterministic local event context encoder/i,
+  /structured context only/i,
+];
 
 const MODEL_LABELS = {
   oil_context_fusion: "Oil Context Fusion",
@@ -165,6 +193,10 @@ const I18N = {
     llm: "AI 해설",
     fallback: "대체 경로",
     cached: "캐시",
+    marketClosed: "시장 폐장",
+    marketDelayed: "공급 지연",
+    actualOhlc: "실제 OHLC",
+    backtestActual: "백테스트 실제",
     newsTimeline: "뉴스 이벤트",
     newsCountUnit: "건",
     bullishShort: "상방",
@@ -176,20 +208,23 @@ const I18N = {
     loadingNews: "실시간 뉴스 갱신 중",
     loadingCommentary: "AI 시황 갱신 중",
     commentaryGenerating: "해설 생성 중입니다.",
-    selectOriginFirst: "차트에서 기준 시점을 선택한 뒤 백테스트로 전환하세요.",
+    selectOriginFirst: "백테스트 모드입니다. 차트를 클릭하면 그 시점부터 예측과 실제 가격 흐름을 비교합니다.",
+    backtestClickGuide: "백테스트 모드입니다. 차트를 클릭하면 그 시점부터 예측과 실제 가격 흐름을 비교합니다.",
     latestUpdates: "최신 업데이트",
     moreEvents: "이벤트 더 보기",
     sourceUnknown: "출처 미상",
     minutesAgo: "분 전",
     hoursAgo: "시간 전",
     justNow: "방금 전",
-    chatTitle: "AI 시황 질문",
+    chatTitle: "AI에게 묻기",
     chatScope: "현재 유가/뉴스/모델 기준",
     chatEmpty: "예측 결과나 시황에 대해 짧게 질문해보세요.",
     chatPlaceholder: "예: 지금 상승 예측의 핵심 근거가 뭐야?",
-    chatAsk: "질문",
-    chatLoading: "답변 생성 중",
-    chatError: "답변을 불러오지 못했습니다.",
+    chatAsk: "전송",
+    chatLoading: "작성 중",
+    chatError: "인공지능 해설가가 응답하지 않아요. 외부 LLM 연결 또는 사용량을 확인해 주세요.",
+    aiUnavailable: "인공지능 해설가가 응답하지 않아요. 외부 LLM 연결 또는 사용량을 확인해 주세요.",
+    aiUnavailableShort: "응답 없음",
     trainRequired: "학습 필요",
     bandVolBased: "변동성 기반",
     reportTitle: "예측 리포트",
@@ -197,6 +232,9 @@ const I18N = {
     reportGenerating: "리포트 갱신 중",
     reportEmpty: "현재 예측 결과를 사용자용 요약 리포트로 작성합니다.",
     reportUnavailable: "리포트를 불러오지 못했습니다.",
+    forecastWeek1: "1주",
+    forecastWeek2: "2주",
+    forecastMonth: "한달",
   },
   en: {
     appTitle: "Oil Price Forecast Dashboard",
@@ -227,6 +265,10 @@ const I18N = {
     llm: "AI commentary",
     fallback: "fallback",
     cached: "cached",
+    marketClosed: "MARKET CLOSED",
+    marketDelayed: "DELAYED",
+    actualOhlc: "Actual OHLC",
+    backtestActual: "Backtest Actual",
     newsTimeline: "News events",
     newsCountUnit: "",
     bullishShort: "Bull",
@@ -238,7 +280,8 @@ const I18N = {
     loadingNews: "Refreshing live news",
     loadingCommentary: "Refreshing AI market commentary",
     commentaryGenerating: "Generating commentary.",
-    selectOriginFirst: "Select an origin on the chart before switching to backtest.",
+    selectOriginFirst: "Backtest mode. Click the chart to compare the forecast with the actual price path from that point.",
+    backtestClickGuide: "Backtest mode. Click the chart to compare the forecast with the actual price path from that point.",
     latestUpdates: "Latest Updates",
     moreEvents: "Show more events",
     sourceUnknown: "Unknown source",
@@ -249,9 +292,11 @@ const I18N = {
     chatScope: "Current oil/news/model",
     chatEmpty: "Ask a short question about the forecast or market context.",
     chatPlaceholder: "e.g. What supports the current upside view?",
-    chatAsk: "Ask",
-    chatLoading: "Generating answer",
-    chatError: "Unable to load an answer.",
+    chatAsk: "Send",
+    chatLoading: "Writing",
+    chatError: "The AI analyst is not responding. Check the external LLM connection or usage limits.",
+    aiUnavailable: "The AI analyst is not responding. Check the external LLM connection or usage limits.",
+    aiUnavailableShort: "No response",
     trainRequired: "Train required",
     bandVolBased: "Vol based",
     reportTitle: "Forecast Report",
@@ -259,6 +304,9 @@ const I18N = {
     reportGenerating: "Refreshing report",
     reportEmpty: "Generate a concise user-facing report from the current forecast.",
     reportUnavailable: "Report unavailable.",
+    forecastWeek1: "1W",
+    forecastWeek2: "2W",
+    forecastMonth: "1M",
   },
 };
 
@@ -266,10 +314,115 @@ function t(key) {
   return I18N[currentLanguage]?.[key] || I18N.ko[key] || key;
 }
 
+function localeCode() {
+  return currentLanguage === "en" ? "en-US" : "ko-KR";
+}
+
+function formatDateTimeValue(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat(localeCode(), {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatDateValue(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat(localeCode(), {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+function timeZoneParts(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+function oilFuturesSessionState(now = new Date()) {
+  const parts = timeZoneParts(now, "America/New_York");
+  const weekday = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[parts.weekday] ?? 0;
+  const minutes = Number(parts.hour || 0) * 60 + Number(parts.minute || 0);
+  const closedForWeekend = weekday === 6 || (weekday === 5 && minutes >= 17 * 60) || (weekday === 0 && minutes < 18 * 60);
+  const closedForDailyBreak = !closedForWeekend && minutes >= 17 * 60 && minutes < 18 * 60;
+  return {
+    isLikelyOpen: !(closedForWeekend || closedForDailyBreak),
+    reason: closedForWeekend ? "weekend" : closedForDailyBreak ? "daily_break" : "open",
+  };
+}
+
+function dataStatusLabel(dataStatus) {
+  const status = String(dataStatus?.status || "unknown").toLowerCase();
+  if (status === "stale") {
+    const session = oilFuturesSessionState();
+    return session.isLikelyOpen ? t("marketDelayed") : t("marketClosed");
+  }
+  return status.toUpperCase();
+}
+
 function currentOilSymbol() {
-  const input = document.getElementById("symbol-input");
-  if (input && input.value !== DEFAULT_SYMBOL) input.value = DEFAULT_SYMBOL;
   return DEFAULT_SYMBOL;
+}
+
+function currentInterval() {
+  return DEFAULT_INTERVAL;
+}
+
+function currentHorizon() {
+  return String(DEFAULT_HORIZON);
+}
+
+function currentHorizonNumber() {
+  return DEFAULT_HORIZON;
+}
+
+function activePanelOriginTime() {
+  return chartMode === "backtest" ? selectedBacktestTime || null : null;
+}
+
+function dashboardPanelKey(symbol, interval, models, horizon, originTime = null, language = currentLanguage) {
+  return `${symbol}|${interval}|${models || ""}|${horizon || ""}|${originTime || ""}|${language}`;
+}
+
+function currentDashboardAnalysisKey(language = currentLanguage) {
+  return dashboardPanelKey(
+    currentOilSymbol(),
+    currentInterval(),
+    forecastModelsQuery(),
+    currentHorizon(),
+    activePanelOriginTime(),
+    language,
+  );
+}
+
+function isDashboardAnalysisRequestCurrent(analysisKey, languageAtRequest, reqId) {
+  return (
+    reqId === requestVersion &&
+    currentLanguage === languageAtRequest &&
+    analysisKey === currentDashboardAnalysisKey(languageAtRequest)
+  );
+}
+
+function clearDashboardAnalysisPanels() {
+  latestContextPayload = null;
+  latestCommentaryPayload = null;
+  latestReportPayload = null;
+  latestAnalysisPayloadKey = "";
+  closeNewsPopover();
+  renderContextMarkers(null);
+  renderNewsTimeline(null);
 }
 
 function setLanguage(language, refreshPanels = true) {
@@ -281,26 +434,29 @@ function setLanguage(language, refreshPanels = true) {
   } catch {
     // Browser privacy modes can block localStorage; the in-memory language state is enough.
   }
+  if (refreshPanels) clearDashboardAnalysisPanels();
   applyLanguage();
   if (!refreshPanels) return;
   lastContextKey = "";
   lastCommentaryKey = "";
   lastReportKey = "";
+  lastAnalysisKey = "";
+  analysisRequestVersion += 1;
   commentaryRequestVersion += 1;
   reportRequestVersion += 1;
+  pendingAnalysisRefresh = null;
   commentaryRequestInFlight = false;
   reportRequestInFlight = false;
+  renderMarketContextLoading();
   renderModelCommentaryLoading();
   renderForecastReportLoading();
-  const intervalInput = document.getElementById("interval-input");
-  const horizonInput = document.getElementById("horizon-input");
   refreshDashboardPanels(
     currentOilSymbol(),
-    intervalInput?.value || "1d",
+    currentInterval(),
     forecastModelsQuery(),
-    horizonInput?.value || "",
+    currentHorizon(),
     requestVersion,
-    { forceContext: false, forceCommentary: true, forceReport: true },
+    { forceContext: true, forceCommentary: true, forceReport: true },
   );
 }
 
@@ -314,22 +470,31 @@ function activeLoadingMessages() {
   return messages;
 }
 
+function setChartUpdatedValue(updatedAt = lastChartUpdatedAt) {
+  if (updatedAt !== undefined) lastChartUpdatedAt = updatedAt;
+  const node = document.getElementById("chart-updated-value");
+  if (!node) return;
+  const messages = activeLoadingMessages();
+  if (messages.length) {
+    node.textContent = messages.join(" · ");
+    node.dataset.loading = "true";
+    return;
+  }
+  node.textContent = lastChartUpdatedAt ? `${t("updated")} ${formatDateTimeValue(lastChartUpdatedAt)}` : `${t("updated")} -`;
+  delete node.dataset.loading;
+}
+
 function setLoadingState(kind, active) {
   loadingState = { ...loadingState, [kind]: Boolean(active) };
   const banner = document.getElementById("loading-banner");
   const message = document.getElementById("loading-message");
   const chartOverlay = document.getElementById("chart-loading-overlay");
   const chartMessage = document.getElementById("chart-loading-message");
-  const messages = activeLoadingMessages();
   if (banner && message) {
-    if (messages.length) {
-      message.textContent = messages.join(" · ");
-      banner.classList.remove("hidden");
-    } else {
-      banner.classList.add("hidden");
-      message.textContent = "";
-    }
+    banner.classList.add("hidden");
+    message.textContent = "";
   }
+  setChartUpdatedValue();
   if (chartOverlay && chartMessage) {
     const showChartOverlay = loadingState.chart && !latestPayload;
     chartMessage.textContent = t("loadingChart");
@@ -361,16 +526,21 @@ function applyLanguage() {
     node.setAttribute("title", text);
   });
   updateReportActionButton();
+  applyChartSeriesLanguage();
   if (latestPayload) {
     setMetrics(latestPayload.metrics || {}, latestPayload.updated_at, latestPayload.forecast_horizon, latestPayload.confidence_level);
     setDataStatusBadge(latestPayload.data_status);
     setChartDataWarning(latestPayload.data_status);
     setForecastBadges(latestPayload);
     setForecastNotices(latestPayload);
-    renderMarketContextPanel(latestContextPayload);
-    renderModelCommentary(latestCommentaryPayload);
-    renderForecastReport(latestReportPayload);
+    const currentAnalysisKey = currentDashboardAnalysisKey();
+    const matchingAnalysisPayload = latestAnalysisPayloadKey === currentAnalysisKey;
+    renderMarketContextPanel(matchingAnalysisPayload ? latestContextPayload : null);
+    renderModelCommentary(matchingAnalysisPayload ? latestCommentaryPayload : null);
+    renderForecastReport(matchingAnalysisPayload ? latestReportPayload : null);
+    renderContextMarkers(matchingAnalysisPayload ? latestContextPayload : null);
   }
+  updateBacktestControls();
   setLoadingState("chart", loadingState.chart);
 }
 
@@ -573,16 +743,21 @@ function localizeRole(value) {
   if (currentLanguage !== "ko") return text;
   if (text === "context/event encoder only") return "컨텍스트/이벤트 인코더 전용";
   if (text === "deterministic_context_narrative") return "규칙 기반 시나리오";
+  if (text === "bullish") return "상방 흐름";
+  if (text === "bearish") return "하방 흐름";
+  if (text === "mixed") return "엇갈린 흐름";
+  if (text === "neutral") return "중립 흐름";
   return text;
 }
 
 function localizeNewsSource(value) {
   const source = String(value || "unknown");
   if (currentLanguage !== "ko") return source.replaceAll("_", " ");
-  if (source === "live_public_news") return "실시간 공개 뉴스";
-  if (source === "live_public_news_cached") return "실시간 공개 뉴스 캐시";
+  if (source === "live_public_news") return "최근 뉴스";
+  if (source === "live_public_news_cached") return "최근 뉴스";
   if (source === "live_public_news_unavailable") return "실시간 뉴스 실패";
-  if (source === "offline_cache") return "오프라인 캐시";
+  if (source === "point_in_time_news_cache") return "기준시점 뉴스";
+  if (source === "offline_cache") return "저장된 뉴스";
   return source.replaceAll("_", " ");
 }
 
@@ -608,30 +783,61 @@ function setMetrics(metrics, updatedAt, forecastHorizon, confidenceLevel) {
   document.getElementById("mae-value").textContent = metrics.mae === null || metrics.mae === undefined ? fallbackText : formatMetric(metrics.mae);
   document.getElementById("rmse-value").textContent = metrics.rmse === null || metrics.rmse === undefined ? fallbackText : formatMetric(metrics.rmse);
   document.getElementById("mape-value").textContent = metrics.mape === null || metrics.mape === undefined ? fallbackText : formatMetric(metrics.mape, "%");
-  document.getElementById("chart-updated-value").textContent =
-    `${t("updated")} ${new Date(updatedAt).toLocaleString()}`;
+  setChartUpdatedValue(updatedAt);
   document.querySelectorAll(".metric-card h3").forEach((heading) => {
     heading.dataset.mode = mode;
     heading.title = mode === "backtest" ? t("backtestMetric") : t("liveMetric");
   });
 }
 
+function dataStatusTooltipText(dataStatus) {
+  const status = String(dataStatus?.status || "unknown").toLowerCase();
+  const warnings = Array.isArray(dataStatus?.warnings) ? dataStatus.warnings.filter(Boolean) : [];
+  if (status === "stale") {
+    const session = oilFuturesSessionState();
+    if (currentLanguage === "ko") {
+      return session.isLikelyOpen
+        ? "데이터 공급자가 최신 봉을 아직 갱신하지 않았습니다. 차트는 마지막으로 수신한 데이터를 기준으로 표시됩니다."
+        : "원유 선물 시장이 폐장 또는 일일 정산 시간일 가능성이 있어 라이브 봉이 갱신되지 않았습니다. 차트는 마지막으로 수신한 데이터를 기준으로 표시됩니다.";
+    }
+    return session.isLikelyOpen
+      ? "The data provider has not published the latest bar yet. The chart shows the latest received data."
+      : "The crude oil futures market is likely closed or in its daily break. The chart shows the latest received data.";
+  }
+  if (["mock", "fallback", "error"].includes(status)) {
+    const label = dataStatusLabel(dataStatus);
+    const detail = warnings.length ? ` ${warnings.slice(0, 2).join(" ")}` : "";
+    return currentLanguage === "ko"
+      ? `현재 데이터 상태는 ${label}입니다. 실제 시장 데이터와 다를 수 있습니다.${detail}`
+      : `Current data status is ${label}. It may differ from live market data.${detail}`;
+  }
+  return currentLanguage === "ko"
+    ? "현재 차트 데이터 상태입니다."
+    : "Current chart data status.";
+}
+
 function setDataStatusBadge(dataStatus) {
   const badge = document.getElementById("data-status-badge");
   if (!badge) return;
-  const status = String(dataStatus?.status || "unknown").toUpperCase();
-  badge.textContent = `${t("data")} ${status}`;
-  badge.dataset.status = String(dataStatus?.status || "unknown").toLowerCase();
+  const status = String(dataStatus?.status || "unknown").toLowerCase();
+  badge.textContent = `${t("data")} ${dataStatusLabel(dataStatus)}`;
+  badge.dataset.status = status;
+  const tooltip = dataStatusTooltipText(dataStatus);
+  badge.dataset.tooltip = tooltip;
+  badge.setAttribute("aria-label", tooltip);
+  badge.setAttribute("title", tooltip);
 }
 
 function setChartDataWarning(dataStatus) {
   const warning = document.getElementById("chart-data-warning");
   if (!warning) return;
+  const wrap = warning.closest(".chart-wrap");
   const status = String(dataStatus?.status || "").toLowerCase();
   const warnings = Array.isArray(dataStatus?.warnings) ? dataStatus.warnings : [];
-  if (!["mock", "fallback", "stale", "error"].includes(status)) {
+  if (!["mock", "fallback", "error"].includes(status)) {
     warning.classList.add("hidden");
     warning.textContent = "";
+    wrap?.setAttribute("data-warning-visible", "false");
     return;
   }
   const statusText =
@@ -649,6 +855,7 @@ function setChartDataWarning(dataStatus) {
       ? `현재 차트는 ${statusText}를 표시 중입니다. 실제 시장 데이터가 아닐 수 있습니다.${detail}`
       : `Chart is showing ${statusText}. It may not be live market data.${detail}`;
   warning.classList.remove("hidden");
+  wrap?.setAttribute("data-warning-visible", "true");
 }
 
 function setForecastBadges(payload) {
@@ -719,7 +926,7 @@ function formatRelativeTime(epochSeconds) {
   if (minutes < 60) return currentLanguage === "ko" ? `${minutes}${t("minutesAgo")}` : `${minutes} ${t("minutesAgo")}`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return currentLanguage === "ko" ? `${hours}${t("hoursAgo")}` : `${hours} ${t("hoursAgo")}`;
-  return new Date(Number(epochSeconds) * 1000).toLocaleDateString();
+  return formatDateValue(Number(epochSeconds) * 1000);
 }
 
 function formatNewsSource(source) {
@@ -733,41 +940,150 @@ function formatNewsSource(source) {
   return normalized;
 }
 
+function koreanNewsTopic(text) {
+  const lower = String(text || "").toLowerCase();
+  const topics = [];
+  if (/(iran|israel|middle east|hormuz|red sea|war|attack|sanction|geopolitical)/.test(lower)) topics.push("지정학적 긴장");
+  if (/(opec|supply|inventory|inventories|stockpile|refinery|exports?|terminal)/.test(lower)) topics.push("공급과 재고");
+  if (/(demand|china|growth|manufacturing|economy)/.test(lower)) topics.push("수요와 경기");
+  if (/(dollar|rate|fed|treasury|stocks?|equity|risk)/.test(lower)) topics.push("달러·금리·위험선호");
+  if (/(forecast|wti|brent|oil prices?|crude|energy|gas|natgas)/.test(lower)) topics.push("원유 가격 흐름");
+  const unique = [...new Set(topics)].slice(0, 3);
+  return unique.length ? `${unique.join(", ")} 관련 뉴스` : "원유 시장 관련 뉴스";
+}
+
+function displayNewsHeadline(news) {
+  const headline = String(news?.headline || "").trim();
+  if (currentLanguage === "ko" && headline && !/[가-힣]/.test(headline)) {
+    return koreanNewsTopic(headline);
+  }
+  return headline || formatNewsSource(news?.source) || "News";
+}
+
+function isPublicContextText(text) {
+  const value = String(text || "").trim();
+  if (!value || value === "-") return false;
+  if (currentLanguage === "ko" && /[A-Za-z]{3,}/.test(value) && !/[가-힣]/.test(value)) return false;
+  return !NON_PUBLIC_CONTEXT_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function newsSummaryText(newsItems) {
+  const labels = [...new Set((newsItems || []).map((news) => displayNewsHeadline(news)).filter(Boolean))].slice(0, 3);
+  if (!labels.length) return "";
+  if (currentLanguage === "ko") {
+    return labels.join(" / ");
+  }
+  return `Recent related news focuses on ${labels.join(", ")}.`;
+}
+
+function displayContextExplanation(text) {
+  const value = isPublicContextText(text) ? String(text).trim() : "";
+  if (!value) return "";
+  return localizeScenarioText(value);
+}
+
 function eventFactorText(point) {
   const bias = directionLabelForBias(point?.overall_bias || "neutral");
-  const impact = Number(point?.impact_score || 0);
-  const uncertainty = Number(point?.uncertainty ?? 0);
   const count = Number(point?.event_count || 0);
   return currentLanguage === "ko"
-    ? `입력 팩터: ${bias} · 중요도 ${impact.toFixed(2)} · 불확실성 ${uncertainty.toFixed(2)} · 이벤트 ${count}건`
-    : `Input factors: ${bias} · impact ${impact.toFixed(2)} · uncertainty ${uncertainty.toFixed(2)} · events ${count}`;
+    ? `${bias} 흐름 · 관련 뉴스 ${count}${t("newsCountUnit")}`
+    : `${bias} flow · ${count} related news`;
+}
+
+function markerTextForPoint(point) {
+  const bias = String(point?.overall_bias || "neutral").toLowerCase();
+  if (currentLanguage === "ko") {
+    if (bias === "bullish") return "상";
+    if (bias === "bearish") return "하";
+    if (bias === "mixed") return "혼";
+    return "중";
+  }
+  if (bias === "bullish") return "U";
+  if (bias === "bearish") return "D";
+  if (bias === "mixed") return "M";
+  return "N";
+}
+
+function markerTooltipText(point) {
+  const count = Number(point?.event_count || 0);
+  const day = point?.time ? formatDateValue(Number(point.time) * 1000) : "";
+  return currentLanguage === "ko"
+    ? `${directionLabelForBias(point?.overall_bias || "neutral")} 뉴스 ${count}${t("newsCountUnit")}${day ? ` · ${day}` : ""}`
+    : `${directionLabelForBias(point?.overall_bias || "neutral")} news · ${count} item${count === 1 ? "" : "s"}${day ? ` · ${day}` : ""}`;
+}
+
+function newsNearContextPoint(contextPayload, point) {
+  if (Array.isArray(point?.news_items) && point.news_items.length) return point.news_items.slice(0, 5);
+  const eventTime = Number(point?.time || 0);
+  const news = (contextPayload?.news || []).filter((item) => {
+    const itemTime = Number(item.time || 0);
+    if (!Number.isFinite(itemTime) || !Number.isFinite(eventTime)) return false;
+    const days = (eventTime - itemTime) / 86_400;
+    return days >= 0 && days <= 7;
+  });
+  if (news.length) return news.slice(-5).reverse();
+  return (contextPayload?.news || [])
+    .filter((item) => Number(item.time || 0) <= eventTime)
+    .slice(-5)
+    .reverse();
 }
 
 function newsForContextPoint(contextPayload, point) {
-  const pointDay = new Date(Number(point.time) * 1000).toISOString().slice(0, 10);
-  const sameDay = (contextPayload?.news || []).filter((item) => {
-    if (!item.time) return false;
-    return new Date(Number(item.time) * 1000).toISOString().slice(0, 10) === pointDay;
+  const matched = newsNearContextPoint(contextPayload, point);
+  return matched.length
+    ? matched
+    : [{ time: point.time, source: t("sourceUnknown"), headline: point.explanation || t("noContext") }];
+}
+
+function uniqueNewsItems(newsItems) {
+  const seen = new Set();
+  return (newsItems || []).filter((news) => {
+    const key = `${displayNewsHeadline(news)}|${news?.time || ""}|${formatNewsSource(news?.source)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
-  return sameDay.length
-    ? sameDay.slice(-5).reverse()
-    : [
-        {
-          time: point.time,
-          source: t("sourceUnknown"),
-          headline: point.explanation || t("noContext"),
-        },
-      ];
+}
+
+function uniqueDisplayNewsItems(newsItems) {
+  const seen = new Set();
+  return (newsItems || []).filter((news) => {
+    const timestamp = Number(news?.time || 0);
+    const day = Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp * 1000).toISOString().slice(0, 10) : "";
+    const key = `${displayNewsHeadline(news)}|${day}`;
+    if (!displayNewsHeadline(news) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function newsMetaText(news, fallbackTime = null) {
+  const timestamp = news?.time || fallbackTime;
+  const date = timestamp ? formatDateValue(Number(timestamp) * 1000) : "";
+  const source = formatNewsSource(news?.source);
+  return [date, source].filter(Boolean).join(" · ");
+}
+
+function newsPopoverTitle(point) {
+  const timestamp = Number(point?.time || 0);
+  const date = timestamp ? formatDateValue(timestamp * 1000) : "";
+  return currentLanguage === "ko" ? `${date || "선택 시점"} 뉴스` : `${date || "Selected Point"} News`;
 }
 
 function closeNewsPopover() {
-  document.getElementById("news-detail-popover")?.classList.add("hidden");
+  const popover = document.getElementById("news-detail-popover");
+  if (popover) {
+    popover.classList.add("hidden");
+    delete popover.dataset.bias;
+  }
   document.querySelectorAll(".chart-news-marker").forEach((button) => button.setAttribute("aria-expanded", "false"));
 }
 
 function showNewsPopover(point, newsItems, anchor) {
   const popover = document.getElementById("news-detail-popover");
   if (!popover) return;
+  const bias = String(point?.overall_bias || "neutral").toLowerCase();
+  popover.dataset.bias = bias;
   document.querySelectorAll(".chart-news-marker").forEach((button) => button.setAttribute("aria-expanded", "false"));
   anchor?.setAttribute("aria-expanded", "true");
   const head = document.createElement("div");
@@ -776,9 +1092,9 @@ function showNewsPopover(point, newsItems, anchor) {
   title.className = "news-popover-title";
   const icon = document.createElement("span");
   icon.className = "news-popover-icon";
-  icon.textContent = "N";
+  icon.textContent = markerTextForPoint(point);
   const titleText = document.createElement("span");
-  titleText.textContent = t("latestUpdates");
+  titleText.textContent = newsPopoverTitle(point);
   title.append(icon, titleText);
   const close = document.createElement("button");
   close.type = "button";
@@ -789,31 +1105,20 @@ function showNewsPopover(point, newsItems, anchor) {
 
   const list = document.createElement("div");
   list.className = "news-popover-list";
-  newsItems.slice(0, 5).forEach((news) => {
+  uniqueNewsItems(newsItems).slice(0, 5).forEach((news) => {
     const row = document.createElement("article");
     row.className = "news-popover-item";
     const meta = document.createElement("div");
     meta.className = "news-popover-meta";
-    meta.textContent = `${formatRelativeTime(news.time || point.time)} · ${formatNewsSource(news.source)}`;
+    meta.textContent = newsMetaText(news, point.time);
     const headline = document.createElement("div");
     headline.className = "news-popover-headline";
-    headline.textContent = news.headline || point.explanation || "-";
-    const factors = document.createElement("div");
-    factors.className = "news-popover-factors";
-    factors.textContent = eventFactorText(point);
-    row.append(meta, headline, factors);
+    headline.textContent = displayNewsHeadline(news) || displayContextExplanation(point.explanation) || "-";
+    row.append(meta, headline);
     list.append(row);
   });
 
-  const action = document.createElement("button");
-  action.type = "button";
-  action.className = "news-popover-action";
-  action.textContent = t("moreEvents");
-  action.addEventListener("click", () => {
-    document.getElementById("market-context-panel")?.scrollIntoView({ block: "start", behavior: "smooth" });
-  });
-
-  popover.replaceChildren(head, list, action);
+  popover.replaceChildren(head, list);
   popover.classList.remove("hidden");
 }
 
@@ -821,6 +1126,7 @@ function positionNewsMarkers() {
   const root = document.getElementById("chart-news-markers");
   if (!root || !chartRef || !latestPayload?.candles?.length) return;
   const width = root.clientWidth || 1;
+  const rootLeft = root.offsetLeft || 0;
   const timeScale = chartRef.timeScale();
   const candles = latestPayload.candles || [];
   const chartTimes = [
@@ -848,6 +1154,9 @@ function positionNewsMarkers() {
       } catch {
         x = null;
       }
+      if (x !== null && x !== undefined && !Number.isNaN(Number(x))) {
+        x = Number(x) - rootLeft;
+      }
     }
     if (x === null || x === undefined || Number.isNaN(Number(x))) {
       const plottedTime = nearestTime === null ? eventTime : nearestTime;
@@ -855,18 +1164,158 @@ function positionNewsMarkers() {
       const ratio = lastTime > firstTime ? (Math.min(Math.max(plottedTime, firstTime), lastTime) - firstTime) / (lastTime - firstTime) : 0.98;
       x = 12 + ratio * Math.max(1, width - 24);
     }
-    const stagger = index % 2 === 0 ? 0 : 6;
+    const stagger = index % 2 === 0 ? 2 : 9;
     button.style.left = `${Math.min(Math.max(Number(x), 14), width - 14)}px`;
     button.style.bottom = `${stagger}px`;
     const anchorTime = Number(button.dataset.anchorTime || eventTime);
     const anchorSuffix =
       anchorTime && Math.abs(anchorTime - eventTime) > 60
         ? currentLanguage === "ko"
-          ? ` · 차트 기준 ${new Date(anchorTime * 1000).toLocaleDateString()}`
-          : ` · chart anchor ${new Date(anchorTime * 1000).toLocaleDateString()}`
+          ? ` · 차트 기준 ${formatDateValue(anchorTime * 1000)}`
+          : ` · chart anchor ${formatDateValue(anchorTime * 1000)}`
         : "";
     button.title = `${button.dataset.baseTitle || ""}${anchorSuffix}`;
   });
+}
+
+function forecastSegmentEndpoint(predicted, segment) {
+  const data = forecastSegmentData(predicted, segment);
+  return data.length ? data[data.length - 1] : null;
+}
+
+function positionForecastSegmentLabels() {
+  // Forecast horizon labels are native chart markers now, so no DOM positioning is needed.
+}
+
+function scheduleForecastSegmentLabelPositioning() {
+  positionForecastSegmentLabels();
+}
+
+function markerGroupKey(point) {
+  const timestamp = Number(point?.time || 0);
+  if (!Number.isFinite(timestamp)) return "";
+  const interval = currentInterval();
+  if (interval === "1h") return String(Math.floor(timestamp / 3600) * 3600);
+  return new Date(timestamp * 1000).toISOString().slice(0, 10);
+}
+
+function dominantBias(points) {
+  const scores = { bullish: 0, bearish: 0, mixed: 0, neutral: 0 };
+  points.forEach((point) => {
+    const bias = String(point?.overall_bias || "neutral").toLowerCase();
+    const weight = Math.max(1, Number(point?.event_count || 0));
+    if (bias in scores) scores[bias] += weight;
+    else scores.neutral += weight;
+  });
+  return Object.entries(scores).sort((a, b) => b[1] - a[1])[0]?.[0] || "neutral";
+}
+
+function aggregateMarkerPoints(points) {
+  const groups = new Map();
+  points.forEach((point) => {
+    const key = markerGroupKey(point);
+    if (!key) return;
+    const rows = groups.get(key) || [];
+    rows.push(point);
+    groups.set(key, rows);
+  });
+  return [...groups.values()]
+    .map((rows) => {
+      const ordered = [...rows].sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0));
+      const latest = ordered[ordered.length - 1] || {};
+      const newsItems = uniqueNewsItems(ordered.flatMap((point) => point?.news_items || []));
+      const eventCount = newsItems.length || ordered.reduce((total, point) => total + Math.max(1, Number(point?.event_count || 0)), 0);
+      return {
+        ...latest,
+        time: latest.time,
+        overall_bias: dominantBias(ordered),
+        event_count: eventCount,
+        explanation: latest.explanation || ordered.find((point) => point?.explanation)?.explanation || "",
+        news_items: newsItems.length ? newsItems.slice(0, 8) : latest.news_items || [],
+      };
+    })
+    .sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0));
+}
+
+function aggregateContextEventPoints(contextPoints, newsItems) {
+  const newsByDay = new Map();
+  (newsItems || []).forEach((item) => {
+    const timestamp = Number(item?.time || 0);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return;
+    const day = new Date(timestamp * 1000).toISOString().slice(0, 10);
+    const rows = newsByDay.get(day) || [];
+    rows.push(item);
+    newsByDay.set(day, rows);
+  });
+
+  const groups = new Map();
+  (contextPoints || []).forEach((point) => {
+    const key = markerGroupKey(point);
+    if (!key) return;
+    const rows = groups.get(key) || [];
+    rows.push(point);
+    groups.set(key, rows);
+  });
+
+  const rows = [...groups.entries()]
+    .map(([day, points]) => {
+      const ordered = [...points].sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0));
+      const latest = ordered[ordered.length - 1] || {};
+      const publicExplanation = [...ordered].reverse().find((point) => isPublicContextText(point?.explanation))?.explanation || "";
+      const groupedNews = uniqueDisplayNewsItems([
+        ...ordered.flatMap((point) => point?.news_items || []),
+        ...(newsByDay.get(day) || []),
+      ]);
+      if (!groupedNews.length && !publicExplanation) return null;
+      return {
+        ...latest,
+        time: latest.time,
+        overall_bias: dominantBias(ordered),
+        event_count:
+          groupedNews.length || ordered.reduce((total, point) => total + Math.max(1, Number(point?.event_count || 0)), 0),
+        explanation: publicExplanation,
+        news_items: groupedNews.slice(0, 3),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0));
+  return rows.slice(-8).reverse();
+}
+
+function spreadPointsByTime(points, limit = FORECAST_CONTEXT_MARKER_LIMIT) {
+  const ordered = (points || [])
+    .filter((point) => Number.isFinite(Number(point?.time)))
+    .sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0));
+  if (ordered.length <= limit) return ordered;
+  const picked = new Map();
+  const lastIndex = ordered.length - 1;
+  for (let i = 0; i < limit; i += 1) {
+    const index = Math.round((i * lastIndex) / Math.max(1, limit - 1));
+    picked.set(index, ordered[index]);
+  }
+  return [...picked.values()].sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0));
+}
+
+function markerPointsFromContext(contextPayload) {
+  const markerPoints = Array.isArray(contextPayload?.chart_context_points)
+    ? contextPayload.chart_context_points.filter((point) => Number.isFinite(Number(point?.time)))
+    : [];
+  if (markerPoints.length) return spreadPointsByTime(aggregateMarkerPoints(markerPoints));
+
+  const contextPoints = Array.isArray(contextPayload?.context_points)
+    ? contextPayload.context_points.filter((point) => Number.isFinite(Number(point?.time)))
+    : [];
+  if (contextPoints.length) return spreadPointsByTime(aggregateMarkerPoints(contextPoints));
+
+  const newsItems = uniqueNewsItems(contextPayload?.news || [])
+    .filter((news) => Number.isFinite(Number(news?.time)));
+  return spreadPointsByTime(aggregateMarkerPoints(newsItems.map((news) => ({
+    time: news.time,
+    overall_bias: news.bias || contextPayload?.scenario_commentary?.bias || "neutral",
+    event_count: 1,
+    explanation: displayNewsHeadline(news),
+    news_items: [news],
+  }))));
 }
 
 function renderChartNewsMarkers(contextPayload) {
@@ -874,7 +1323,7 @@ function renderChartNewsMarkers(contextPayload) {
   const legacyStrip = document.getElementById("news-timeline");
   if (legacyStrip) legacyStrip.replaceChildren();
   if (!root) return;
-  const points = (contextPayload?.context_points || []).slice(-12);
+  const points = markerPointsFromContext(contextPayload);
   if (!points.length) {
     root.replaceChildren();
     closeNewsPopover();
@@ -882,7 +1331,6 @@ function renderChartNewsMarkers(contextPayload) {
   }
   const markers = points.map((point, idx) => {
     const bias = String(point.overall_bias || "neutral").toLowerCase();
-    const impact = Math.max(0.05, Math.min(Number(point.impact_score || 0), 1));
     const count = Number(point.event_count || 0);
     const button = document.createElement("button");
     button.type = "button";
@@ -890,13 +1338,12 @@ function renderChartNewsMarkers(contextPayload) {
     button.dataset.bias = bias;
     button.dataset.time = String(point.time || "");
     button.dataset.index = String(idx);
-    button.textContent = count > 1 ? String(Math.min(count, 9)) : "N";
+    button.textContent = markerTextForPoint(point);
     button.setAttribute("aria-expanded", "false");
-    const baseTitle =
-      currentLanguage === "ko"
-        ? `${directionLabelForBias(bias)} · 중요도 ${impact.toFixed(2)} · 뉴스 ${count}건`
-        : `${directionLabelForBias(bias)} · impact ${impact.toFixed(2)} · ${count} news`;
+    const baseTitle = markerTooltipText(point);
     button.dataset.baseTitle = baseTitle;
+    button.dataset.tooltip = baseTitle;
+    button.setAttribute("aria-label", baseTitle);
     button.title = baseTitle;
     button.addEventListener("click", (event) => {
       showNewsPopover(point, newsForContextPoint(contextPayload, point), button);
@@ -926,9 +1373,9 @@ function renderMarketContextPanel(contextPayload) {
   const eventsRoot = document.getElementById("context-events");
   if (!eventsRoot) return;
   if (!contextPayload) {
-    if (mode) mode.textContent = "-";
+    if (mode) mode.textContent = "";
     if (summary) summary.textContent = t("noContext");
-    eventsRoot.replaceChildren(document.createTextNode(t("noContext")));
+    eventsRoot.replaceChildren();
     renderNewsTimeline(null);
     return;
   }
@@ -939,29 +1386,28 @@ function renderMarketContextPanel(contextPayload) {
   }
 
   const contextPoints = contextPayload?.context_points || [];
-  const latestInterpretation = [...contextPoints].reverse().find((point) => point?.explanation)?.explanation;
-  if (summary) summary.textContent = localizeScenarioText(latestInterpretation || scenario.summary || "-");
-  const newsByDay = new Map();
-  (contextPayload?.news || []).forEach((item) => {
-    const day = new Date(Number(item.time) * 1000).toISOString().slice(0, 10);
-    const rows = newsByDay.get(day) || [];
-    rows.push(item);
-    newsByDay.set(day, rows);
-  });
-  const rows = contextPoints.slice(-12).reverse().map((point) => {
+  const latestInterpretation = [...contextPoints].reverse().find((point) => isPublicContextText(point?.explanation))?.explanation;
+  const summaryText = displayContextExplanation(scenario.summary || latestInterpretation || "");
+  if (summary) summary.textContent = summaryText || t("noContext");
+  const newsItems = contextPayload?.news || [];
+  const pointsToRender = contextPoints.length
+    ? aggregateContextEventPoints(contextPoints, newsItems)
+    : newsItems.length
+      ? [
+          {
+            time: newsItems[newsItems.length - 1].time,
+            overall_bias: "neutral",
+            explanation: isPublicContextText(scenario.summary) ? scenario.summary : "",
+            news_items: uniqueDisplayNewsItems(newsItems.slice(-5).reverse()).slice(0, 3),
+          },
+        ]
+      : [];
+  const rows = pointsToRender.map((point) => {
     const day = new Date(Number(point.time) * 1000).toISOString().slice(0, 10);
     const item = document.createElement("article");
     item.className = "context-event";
     item.dataset.bias = String(point.overall_bias || "neutral").toLowerCase();
-    const matchedNews = (newsByDay.get(day) || []).slice(-5).reverse();
-    const headlines = matchedNews.length
-      ? matchedNews
-          .map((news) => {
-            const label = document.createElement("span");
-            label.textContent = news.headline || formatNewsSource(news.source) || "News";
-            return label;
-          })
-      : [document.createTextNode(point.explanation || "No matching headline on this day.")];
+    const matchedNews = uniqueDisplayNewsItems(point.news_items?.length ? point.news_items : newsNearContextPoint(contextPayload, point));
     const head = document.createElement("div");
     head.className = "context-event-head";
     const title = document.createElement("strong");
@@ -969,15 +1415,34 @@ function renderMarketContextPanel(contextPayload) {
     const score = document.createElement("span");
     score.textContent = localizeRole(point.overall_bias || "neutral");
     head.append(title, score);
-    const body = document.createElement("p");
-    headlines.forEach((node, idx) => {
-      if (idx) body.append(document.createTextNode(" / "));
-      body.append(node);
+    const newsList = document.createElement("div");
+    newsList.className = "context-news-list";
+    matchedNews.slice(0, 3).forEach((news) => {
+      const newsRow = document.createElement("div");
+      newsRow.className = "context-news-item";
+      const headline = document.createElement("strong");
+      headline.textContent = displayNewsHeadline(news);
+      const meta = document.createElement("span");
+      meta.textContent = newsMetaText(news, point.time);
+      newsRow.append(headline, meta);
+      newsList.append(newsRow);
     });
+    if (!matchedNews.length) {
+      const fallbackText = newsSummaryText(matchedNews);
+      if (fallbackText) {
+        const body = document.createElement("p");
+        body.textContent = fallbackText;
+        newsList.append(body);
+      }
+    }
     const interpretation = document.createElement("p");
     interpretation.className = "context-event-interpretation";
-    interpretation.textContent = localizeScenarioText(point.explanation || "-");
-    item.append(head, body, interpretation);
+    const interpretationText = displayContextExplanation(point.explanation || "");
+    item.append(head, newsList);
+    if (interpretationText) {
+      interpretation.textContent = interpretationText;
+      item.append(interpretation);
+    }
     return item;
   });
   const warnings = (contextPayload?.news_warnings || []).filter(Boolean);
@@ -986,16 +1451,37 @@ function renderMarketContextPanel(contextPayload) {
       ? `실시간 뉴스 수집 실패: ${warnings.join(" ")}`
       : warnings.length
         ? `Live news fetch failed: ${warnings.join(" ")}`
-        : t("noContext");
-  eventsRoot.replaceChildren(...(rows.length ? rows : [document.createTextNode(emptyText)]));
+        : "";
+  eventsRoot.replaceChildren(...(rows.length ? rows : emptyText ? [document.createTextNode(emptyText)] : []));
   renderNewsTimeline(contextPayload);
 }
 
-async function loadMarketContext(symbol, interval, models = "", horizon = "") {
+function renderMarketContextLoading() {
+  const mode = document.getElementById("context-mode");
+  const summary = document.getElementById("scenario-summary");
+  const eventsRoot = document.getElementById("context-events");
+  if (mode) mode.textContent = t("loadingNews");
+  if (summary) {
+    const isBacktestContext = Boolean(activePanelOriginTime());
+    summary.textContent = isBacktestContext
+      ? currentLanguage === "ko"
+        ? "선택한 백테스트 기준 시점의 뉴스/이벤트 컨텍스트를 불러오는 중입니다."
+        : "Loading news and event context for the selected backtest origin."
+      : currentLanguage === "ko"
+        ? "라이브 뉴스와 이벤트 컨텍스트를 불러오는 중입니다."
+        : "Loading live news and event context.";
+  }
+  if (eventsRoot) eventsRoot.replaceChildren();
+  renderNewsTimeline(null);
+}
+
+async function loadMarketContext(symbol, interval, models = "", horizon = "", originTime = null) {
   const modelQuery = models ? `&models=${encodeURIComponent(models)}` : "";
   const horizonQuery = horizon ? `&horizon=${encodeURIComponent(horizon)}` : "";
+  const originQuery = originTime ? `&origin_time=${encodeURIComponent(originTime)}` : "";
+  const liveQuery = originTime ? "" : "&live=1";
   const response = await fetch(
-    `/api/market-context?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}${horizonQuery}${modelQuery}&live=1&_ts=${Date.now()}`,
+    `/api/market-context?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}${horizonQuery}${modelQuery}${originQuery}${liveQuery}&_ts=${Date.now()}`,
     { cache: "no-store" },
   );
   if (!response.ok) throw new Error("market context unavailable");
@@ -1011,7 +1497,7 @@ async function loadModelCommentary(symbol, interval, models = "", originTime = n
     `/api/model-commentary?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}${horizonQuery}${modelQuery}${originQuery}${languageQuery}&_ts=${Date.now()}`,
     { cache: "no-store" },
   );
-  if (!response.ok) throw new Error("model commentary unavailable");
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, t("aiUnavailable")));
   return response.json();
 }
 
@@ -1024,6 +1510,19 @@ async function loadForecastReport(symbol, interval, models = "", horizon = "", l
     { cache: "no-store" },
   );
   if (!response.ok) throw new Error("forecast report unavailable");
+  return response.json();
+}
+
+async function loadDashboardAnalysis(symbol, interval, models = "", horizon = "", originTime = null, language = currentLanguage) {
+  const modelQuery = models ? `&models=${encodeURIComponent(models)}` : "";
+  const horizonQuery = horizon ? `&horizon=${encodeURIComponent(horizon)}` : "";
+  const originQuery = originTime ? `&origin_time=${encodeURIComponent(originTime)}` : "";
+  const languageQuery = `&language=${encodeURIComponent(language)}`;
+  const response = await fetch(
+    `/api/dashboard-analysis?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}${horizonQuery}${modelQuery}${originQuery}${languageQuery}&_ts=${Date.now()}`,
+    { cache: "no-store" },
+  );
+  if (!response.ok) throw new Error(await readApiErrorMessage(response, t("aiUnavailable")));
   return response.json();
 }
 
@@ -1077,13 +1576,12 @@ function renderForecastReport(report) {
       title.textContent = section.title || "-";
       const body = document.createElement("p");
       body.textContent = section.body || "";
-      const list = document.createElement("ul");
-      (section.bullets || []).forEach((bullet) => {
-        const item = document.createElement("li");
-        item.textContent = bullet;
-        list.append(item);
+      article.append(title, body);
+      (section.bullets || []).filter(Boolean).forEach((bullet) => {
+        const paragraph = document.createElement("p");
+        paragraph.textContent = bullet;
+        article.append(paragraph);
       });
-      article.append(title, body, list);
       return article;
     }),
   );
@@ -1154,15 +1652,11 @@ function buildForecastReportPrintView(report) {
     body.textContent = section.body || "";
     article.append(heading, body);
     const bullets = (section.bullets || []).filter(Boolean);
-    if (bullets.length) {
-      const list = document.createElement("ul");
-      bullets.forEach((bullet) => {
-        const item = document.createElement("li");
-        item.textContent = bullet;
-        list.append(item);
-      });
-      article.append(list);
-    }
+    bullets.forEach((bullet) => {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = bullet;
+      article.append(paragraph);
+    });
     root.append(article);
   });
 
@@ -1171,8 +1665,8 @@ function buildForecastReportPrintView(report) {
 
 async function printForecastReportPdf() {
   const symbol = currentOilSymbol();
-  const interval = document.getElementById("interval-input")?.value || "1d";
-  const horizon = document.getElementById("horizon-input")?.value || "";
+  const interval = currentInterval();
+  const horizon = currentHorizon();
   const report = latestReportPayload || await refreshForecastReport(symbol, interval, forecastModelsQuery(), horizon);
   if (!report) return;
 
@@ -1188,8 +1682,8 @@ async function printForecastReportPdf() {
 
 async function loadAssistantChat(question) {
   const symbol = currentOilSymbol();
-  const interval = document.getElementById("interval-input")?.value || "1d";
-  const horizon = document.getElementById("horizon-input")?.value || "";
+  const interval = currentInterval();
+  const horizon = currentHorizon();
   const response = await fetch("/api/assistant-chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1197,13 +1691,37 @@ async function loadAssistantChat(question) {
       question,
       symbol,
       interval,
-      horizon: horizon ? Number(horizon) : null,
+      horizon: currentHorizonNumber(),
       models: forecastModelsQuery(),
       language: currentLanguage,
     }),
   });
-  if (!response.ok) throw new Error("assistant chat unavailable");
+  if (!response.ok) {
+    throw new Error(await readApiErrorMessage(response, t("chatError")));
+  }
   return response.json();
+}
+
+async function readApiErrorMessage(response, fallback) {
+  try {
+    const body = await response.json();
+    const message = body?.detail?.message || body?.detail || fallback;
+    return String(message || fallback);
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function userFacingLlmError(message = "") {
+  const text = String(message || "");
+  const code = text.match(/HTTP\s+\d+/i)?.[0] || "";
+  if (text.includes("인공지능 해설가") || text.includes("AI analyst")) return text;
+  return code ? `${t("aiUnavailable")} ${code}` : t("aiUnavailable");
+}
+
+function scrollChatLogToEnd(log = document.getElementById("llm-chat-log")) {
+  if (!log) return;
+  log.scrollTop = log.scrollHeight;
 }
 
 function appendChatMessage(role, text, warnings = []) {
@@ -1212,19 +1730,33 @@ function appendChatMessage(role, text, warnings = []) {
   if (log.querySelector("[data-i18n='chatEmpty']")) log.replaceChildren();
   const item = document.createElement("article");
   item.className = `llm-chat-message ${role}`;
-  const label = document.createElement("strong");
-  label.textContent = role === "user" ? "Q" : "LLM";
+  item.setAttribute("aria-label", role === "user" ? "User message" : "AI message");
   const body = document.createElement("p");
   body.textContent = text;
-  item.append(label, body);
-  warnings.filter(Boolean).slice(0, 2).forEach((warning) => {
-    const note = document.createElement("span");
-    note.className = "llm-chat-warning";
-    note.textContent = warning;
-    item.append(note);
-  });
+  item.append(body);
+  warnings.filter(Boolean).forEach((warning) => console.warn("Assistant chat warning:", warning));
   log.append(item);
-  log.scrollTop = log.scrollHeight;
+  scrollChatLogToEnd(log);
+}
+
+function appendChatTypingIndicator() {
+  const log = document.getElementById("llm-chat-log");
+  if (!log) return null;
+  if (log.querySelector("[data-i18n='chatEmpty']")) log.replaceChildren();
+  const item = document.createElement("article");
+  item.className = "llm-chat-message assistant typing";
+  item.setAttribute("aria-label", t("chatLoading"));
+  item.setAttribute("role", "status");
+  const dots = document.createElement("span");
+  dots.className = "llm-chat-typing-dots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 3; index += 1) {
+    dots.append(document.createElement("span"));
+  }
+  item.append(dots);
+  log.append(item);
+  scrollChatLogToEnd(log);
+  return item;
 }
 
 function replaceResolvedSymbolText(text, commentary = null) {
@@ -1256,31 +1788,44 @@ function bindAssistantChat() {
   const input = document.getElementById("llm-chat-input");
   const button = document.getElementById("llm-chat-submit");
   if (!form || !input || !button) return;
+  let isComposing = false;
   const submitQuestion = async (event) => {
     event.preventDefault();
+    if (chatRequestInFlight || isComposing) return;
     const question = input.value.trim();
     if (!question) return;
+    chatRequestInFlight = true;
     input.value = "";
     appendChatMessage("user", question);
+    const typingIndicator = appendChatTypingIndicator();
     button.disabled = true;
     button.textContent = t("chatLoading");
     try {
       const answer = await loadAssistantChat(question);
+      typingIndicator?.remove();
       appendChatMessage("assistant", answer.answer || "-", answer.warnings || []);
     } catch (error) {
-      appendChatMessage("assistant", t("chatError"), [String(error?.message || error)]);
+      typingIndicator?.remove();
+      appendChatMessage("assistant", userFacingLlmError(error?.message || t("chatError")), [String(error?.message || error)]);
     } finally {
+      chatRequestInFlight = false;
       button.disabled = false;
       button.textContent = t("chatAsk");
+      input.focus();
     }
   };
   form.addEventListener("submit", submitQuestion);
-  button.addEventListener("click", (event) => {
-    if (button.disabled) return;
-    submitQuestion(event);
+  input.addEventListener("compositionstart", () => {
+    isComposing = true;
+  });
+  input.addEventListener("compositionend", () => {
+    isComposing = false;
   });
   input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") submitQuestion(event);
+    if (event.key !== "Enter") return;
+    if (event.isComposing || isComposing) {
+      event.preventDefault();
+    }
   });
 }
 
@@ -1292,6 +1837,18 @@ function renderModelCommentaryLoading() {
   if (status) status.textContent = t("loadingCommentary");
   if (summary) summary.textContent = t("commentaryGenerating");
   if (risks) risks.replaceChildren();
+}
+
+function unavailableCommentary(message = t("aiUnavailable")) {
+  return {
+    mode: "llm_unavailable",
+    summary: userFacingLlmError(message),
+    model_interpretation: "",
+    risk_notes: [],
+    warnings: [String(message || "")].filter(Boolean),
+    llm_used: false,
+    llm_error: true,
+  };
 }
 
 function escapeRegex(value) {
@@ -1337,8 +1894,7 @@ function renderModelCommentary(commentary) {
     return;
   }
   if (status) {
-    const mode = commentary.llm_used ? "LLM" : "fallback";
-    const modeLabel = commentary.llm_used ? t("llm") : t("fallback");
+    const modeLabel = commentary.llm_used ? t("llm") : t("aiUnavailableShort");
     status.textContent = commentary.cached
       ? (currentLanguage === "ko" ? "최근 해설" : "recent")
       : modeLabel;
@@ -1368,14 +1924,9 @@ function refreshModelCommentary(symbol, interval, models = "", originTime = null
       if (reqId !== requestVersion || commentaryReqId !== commentaryRequestVersion || currentLanguage !== languageAtRequest) return;
       renderModelCommentary(commentary);
     })
-    .catch(() => {
+    .catch((error) => {
       if (reqId !== requestVersion || commentaryReqId !== commentaryRequestVersion || currentLanguage !== languageAtRequest) return;
-      renderModelCommentary({
-        summary: currentLanguage === "ko" ? "모델 해설을 불러오지 못했습니다." : "Model commentary unavailable.",
-        risk_notes: [],
-        warnings: [],
-        llm_used: false,
-      });
+      renderModelCommentary(unavailableCommentary(error?.message || t("aiUnavailable")));
     })
     .finally(() => {
       if (commentaryReqId !== commentaryRequestVersion) return;
@@ -1411,7 +1962,12 @@ function setInfoMessages(messages) {
 }
 
 function setForecastNotices(payload) {
-  setStatus(payload.warning || null, "warning");
+  const dataStatus = String(payload.data_status?.status || "").toLowerCase();
+  if (["mock", "fallback", "stale", "error"].includes(dataStatus)) {
+    setStatus(null);
+  } else {
+    setStatus(payload.warning || null, "warning");
+  }
   const messages = [];
   (payload.info_messages || [])
     .filter((message) => !String(message || "").includes("Quantile bands are residual-volatility adapters"))
@@ -1446,13 +2002,13 @@ function toUnixTime(time) {
 function toDisplayTime(time) {
   const ts = toUnixTime(time);
   if (ts === null) return "-";
-  return new Date(ts * 1000).toLocaleString();
+  return formatDateTimeValue(ts * 1000);
 }
 
 function candleAtOrBefore(time) {
   const ts = toUnixTime(time);
-  if (ts === null || !latestPayload) return null;
-  const candles = latestPayload.candles || [];
+  if (ts === null) return null;
+  const candles = latestLivePayload?.candles?.length ? latestLivePayload.candles : latestPayload?.candles || [];
   if (candles.length && ts > Number(candles[candles.length - 1].time)) return null;
   let match = null;
   for (const candle of candles) {
@@ -1475,15 +2031,30 @@ function setBacktestStatus(message = "", severity = "info") {
 function updateBacktestControls() {
   const originValue = document.getElementById("backtest-origin-value");
   const modeToggle = document.getElementById("backtest-mode-toggle");
+  const chartPanel = document.querySelector(".chart-panel");
+  const status = document.getElementById("backtest-status");
   if (originValue) {
     originValue.textContent = selectedBacktestTime ? toDisplayTime(selectedBacktestTime) : "-";
   }
   if (modeToggle) {
-    modeToggle.checked = !activeBacktestPayload;
+    const isLiveMode = chartMode !== "backtest";
+    modeToggle.checked = isLiveMode;
     modeToggle.setAttribute("aria-checked", modeToggle.checked ? "true" : "false");
     const shell = modeToggle.closest(".chart-mode-toggle");
-    shell?.setAttribute("data-disabled", !selectedBacktestTime && !activeBacktestPayload ? "true" : "false");
+    shell?.setAttribute("data-disabled", "false");
+    chartPanel?.setAttribute("data-mode", isLiveMode ? "live" : "backtest");
   }
+  if (chartMode === "backtest" && !activeBacktestPayload && !loadingState.backtest) {
+    if (status?.dataset.severity !== "error") {
+      setBacktestStatus(t("backtestClickGuide"), "guide");
+    }
+  } else if (chartMode !== "backtest" && !activeBacktestPayload && !loadingState.backtest) {
+    setBacktestStatus("");
+  }
+}
+
+function isBacktestModeRequested() {
+  return chartMode === "backtest";
 }
 
 function selectBacktestOrigin(time) {
@@ -1492,11 +2063,38 @@ function selectBacktestOrigin(time) {
   selectedBacktestTime = candle.time;
   setBacktestStatus("");
   updateBacktestControls();
+  if (isBacktestModeRequested()) {
+    clearDashboardAnalysisPanels();
+    lastAnalysisKey = "";
+    analysisRequestVersion += 1;
+    pendingAnalysisRefresh = null;
+    void runSelectedBacktest();
+  }
 }
 
 function formatPrice(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return Number(value).toFixed(4);
+}
+
+function applyChartSeriesLanguage() {
+  if (candleSeriesRef && typeof candleSeriesRef.applyOptions === "function") {
+    candleSeriesRef.applyOptions({ title: "" });
+  }
+  if (backtestActualSeriesRef && typeof backtestActualSeriesRef.applyOptions === "function") {
+    backtestActualSeriesRef.applyOptions({ title: "" });
+  }
+  forecastSegmentSeriesRefs.forEach((series, id) => {
+    const segment = FORECAST_SEGMENTS.find((item) => item.id === id);
+    if (segment && typeof series.applyOptions === "function") {
+      series.applyOptions({ title: "" });
+    }
+  });
+  renderForecastSegmentSeries(latestPayload?.predicted || []);
+  renderForecastSegmentLegend(latestPayload);
+  if (activeBacktestOriginMarker) {
+    activeBacktestOriginMarker = { ...activeBacktestOriginMarker, text: t("origin") };
+  }
 }
 
 function primaryForecastModel(payload) {
@@ -1761,7 +2359,12 @@ function createFallbackChart(container) {
         });
         ctx.strokeStyle = colorOf(series, "#58a6ff");
         ctx.lineWidth = series.options?.lineWidth || 1.5;
+        const lineStyleValue = Number(series.options?.lineStyle ?? 0);
+        ctx.setLineDash(lineStyleValue === 1 ? [1, 5] : lineStyleValue === 2 ? [6, 5] : []);
+        ctx.lineCap = lineStyleValue === 1 ? "round" : "butt";
         ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.lineCap = "butt";
       });
   };
 
@@ -1825,6 +2428,17 @@ function createFallbackChart(container) {
   };
 }
 
+function resizeChartToContainer() {
+  if (!chartRef) return;
+  const container = document.getElementById("oilChart");
+  if (!container) return;
+  const width = Math.max(1, Math.round(container.clientWidth || 1));
+  const height = Math.max(1, Math.round(container.clientHeight || 460));
+  chartRef.applyOptions({ width, height });
+  positionNewsMarkers();
+  scheduleForecastSegmentLabelPositioning();
+}
+
 function ensureChart() {
   if (chartRef) return;
   const container = document.getElementById("oilChart");
@@ -1850,8 +2464,8 @@ function ensureChart() {
       crosshair: {
         mode: LightweightCharts.CrosshairMode.Normal,
       },
-      width: container.clientWidth,
-      height: 460,
+      width: Math.max(1, container.clientWidth || 1),
+      height: Math.max(1, container.clientHeight || 460),
     });
   } else {
     chartRef = createFallbackChart(container);
@@ -1896,7 +2510,7 @@ function ensureChart() {
   };
 
   predBandFillRef = createAreaSeries({
-    title: "P10-P90 Forecast Band",
+    title: "",
     lineColor: "rgba(88, 166, 255, 0.0)",
     topColor: "rgba(88, 166, 255, 0.24)",
     bottomColor: "rgba(88, 166, 255, 0.04)",
@@ -1914,7 +2528,7 @@ function ensureChart() {
     lastValueVisible: false,
   });
   predTailFillRef = createAreaSeries({
-    title: "P05-P95 Tail Band",
+    title: "",
     lineColor: "rgba(188, 140, 255, 0.0)",
     topColor: "rgba(188, 140, 255, 0.12)",
     bottomColor: "rgba(188, 140, 255, 0.02)",
@@ -1932,16 +2546,17 @@ function ensureChart() {
   });
 
   candleSeriesRef = createCandlestickSeries({
-    title: "실제 OHLC",
+    title: "",
     upColor: "#2dd4bf",
     downColor: "#ff7b72",
     borderUpColor: "#2dd4bf",
     borderDownColor: "#ff7b72",
     wickUpColor: "#2dd4bf",
     wickDownColor: "#ff7b72",
+    lastValueVisible: false,
   });
   backtestActualSeriesRef = createCandlestickSeries({
-    title: "백테스트 실제",
+    title: "",
     upColor: "rgba(126, 231, 135, 0.28)",
     downColor: "rgba(255, 123, 114, 0.28)",
     borderUpColor: "rgba(126, 231, 135, 0.52)",
@@ -1952,20 +2567,36 @@ function ensureChart() {
     lastValueVisible: false,
   });
   predSeriesRef = createLineSeries({
-    title: "Predicted",
+    title: "",
     color: "#58a6ff",
     lineWidth: 2.2,
-    lineStyle: lineStyle.Dashed !== undefined ? lineStyle.Dashed : 2,
+    lineStyle: lineStyle.Dotted !== undefined ? lineStyle.Dotted : 1,
+    priceLineVisible: false,
+    lastValueVisible: false,
+  });
+  forecastSegmentSeriesRefs = new Map();
+  FORECAST_SEGMENTS.forEach((segment) => {
+    forecastSegmentSeriesRefs.set(
+      segment.id,
+      createLineSeries({
+        title: "",
+        color: segment.color,
+        lineWidth: 3,
+        lineStyle: lineStyle.Dotted !== undefined ? lineStyle.Dotted : 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      }),
+    );
   });
   predUpperSeriesRef = createLineSeries({
-    title: "Pred Upper",
+    title: "",
     color: "rgba(88, 166, 255, 0.56)",
     lineWidth: 1.2,
     priceLineVisible: false,
     lastValueVisible: false,
   });
   predLowerSeriesRef = createLineSeries({
-    title: "Pred Lower",
+    title: "",
     color: "rgba(88, 166, 255, 0.56)",
     lineWidth: 1.2,
     priceLineVisible: false,
@@ -1973,17 +2604,20 @@ function ensureChart() {
   });
 
   if (!isResizeBound) {
-    window.addEventListener("resize", () => {
-      if (chartRef) {
-        chartRef.applyOptions({ width: container.clientWidth });
-        positionNewsMarkers();
-      }
-    });
+    window.addEventListener("resize", resizeChartToContainer);
+    if (typeof ResizeObserver !== "undefined") {
+      chartResizeObserver = new ResizeObserver(resizeChartToContainer);
+      chartResizeObserver.observe(container);
+    }
     isResizeBound = true;
   }
+  resizeChartToContainer();
   const timeScale = chartRef.timeScale();
   if (timeScale && typeof timeScale.subscribeVisibleLogicalRangeChange === "function") {
-    timeScale.subscribeVisibleLogicalRangeChange(positionNewsMarkers);
+    timeScale.subscribeVisibleLogicalRangeChange(() => {
+      positionNewsMarkers();
+      scheduleForecastSegmentLabelPositioning();
+    });
   }
 
   if (!isCrosshairBound && typeof chartRef.subscribeCrosshairMove === "function") {
@@ -2022,7 +2656,7 @@ function setInitialForecastView(payload) {
   const rightPadding = Math.max(8, Math.round(futureBars * 0.18));
   const forecastPosition = 0.62;
   const minPastBarsByInterval = {
-    "1d": 90,
+    "1d": 128,
     "1h": 160,
     "30m": 180,
     "15m": 220,
@@ -2060,6 +2694,53 @@ function rebuildForecastLookup(models) {
   forecastByTime = next;
 }
 
+function forecastSegmentLabel(segment) {
+  return t(segment.labelKey);
+}
+
+function forecastSegmentData(predicted, segment) {
+  const rows = Array.isArray(predicted) ? predicted : [];
+  if (rows.length < 2) return [];
+  const startIndex = Math.max(1, segment.start);
+  const endIndex = Math.min(segment.end, rows.length - 1);
+  if (endIndex < startIndex) return [];
+  const anchorIndex = Math.max(0, startIndex - 1);
+  return rows.slice(anchorIndex, endIndex + 1).map((point) => ({ time: point.time, value: point.value }));
+}
+
+function forecastSegmentMarker(predicted, segment) {
+  const endpoint = forecastSegmentEndpoint(predicted, segment);
+  if (!endpoint) return [];
+  return [
+    {
+      time: endpoint.time,
+      position: "inBar",
+      color: segment.color,
+      shape: "circle",
+      text: forecastSegmentLabel(segment),
+    },
+  ];
+}
+
+function renderForecastSegmentSeries(predicted) {
+  FORECAST_SEGMENTS.forEach((segment) => {
+    const series = forecastSegmentSeriesRefs.get(segment.id);
+    if (!series) return;
+    series.setData(forecastSegmentData(predicted, segment));
+    if (typeof series.setMarkers === "function") {
+      series.setMarkers(forecastSegmentMarker(predicted, segment));
+    }
+  });
+}
+
+function renderForecastSegmentLegend(payload) {
+  const root = document.getElementById("forecast-segment-legend");
+  if (!root) return;
+  void payload;
+  root.replaceChildren();
+  root.classList.add("hidden");
+}
+
 function renderForecastModelSeries(models) {
   if (!createLineSeriesRef) return;
   const lineStyle =
@@ -2081,19 +2762,22 @@ function renderForecastModelSeries(models) {
     let series = forecastModelSeriesRefs.get(model.id);
     if (!series) {
       series = createLineSeriesRef({
-        title: model.label || model.id,
+        title: "",
         color: model.color || "#8b949e",
         lineWidth: model.id === "ensemble" ? 2 : 1.4,
-        lineStyle: lineStyle.Solid !== undefined ? lineStyle.Solid : 0,
+        lineStyle: lineStyle.Dotted !== undefined ? lineStyle.Dotted : 1,
         priceLineVisible: false,
         lastValueVisible: false,
       });
       forecastModelSeriesRefs.set(model.id, series);
     } else if (typeof series.applyOptions === "function") {
       series.applyOptions({
-        title: model.label || model.id,
+        title: "",
         color: model.color || "#8b949e",
         lineWidth: model.id === "ensemble" ? 2 : 1.4,
+        lineStyle: lineStyle.Dotted !== undefined ? lineStyle.Dotted : 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
       });
     }
     series.setData(model.points || []);
@@ -2104,8 +2788,10 @@ function renderChart(payload, resetView = false, options = {}) {
   ensureChart();
   const isBacktest = options.mode === "backtest";
   if (!isBacktest) {
+    chartMode = "live";
     activeBacktestPayload = null;
     activeBacktestOriginMarker = null;
+    latestLivePayload = payload;
     if (backtestActualSeriesRef) {
       backtestActualSeriesRef.setData([]);
     }
@@ -2130,9 +2816,15 @@ function renderChart(payload, resetView = false, options = {}) {
   const primaryModel = primaryForecastModel(payload);
   if (primaryModel && typeof predSeriesRef.applyOptions === "function") {
     predSeriesRef.applyOptions({
-      title: `${primaryModel.label || "Primary"} Forecast`,
+      title: "",
       color: primaryModel.color || "#d29922",
       lineWidth: 2.4,
+      lineStyle:
+        typeof LightweightCharts !== "undefined" && LightweightCharts.LineStyle?.Dotted !== undefined
+          ? LightweightCharts.LineStyle.Dotted
+          : 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
   }
   predTailFillRef.setData(tailUpper);
@@ -2143,30 +2835,37 @@ function renderChart(payload, resetView = false, options = {}) {
   if (backtestActualSeriesRef) {
     backtestActualSeriesRef.setData(isBacktest ? payload.actual_future_candles || [] : []);
   }
-  predSeriesRef.setData(payload.predicted || []);
+  renderForecastSegmentSeries(payload.predicted || []);
+  predSeriesRef.setData([]);
+  renderForecastSegmentLegend(payload);
   predUpperSeriesRef.setData(upper);
   predLowerSeriesRef.setData(lower);
   renderForecastModelSeries(visibleModels);
-  renderContextMarkers(latestContextPayload);
-  renderNewsTimeline(latestContextPayload);
+  const chartContextPayload = latestAnalysisPayloadKey === currentDashboardAnalysisKey() ? latestContextPayload : null;
+  renderContextMarkers(chartContextPayload);
+  renderNewsTimeline(chartContextPayload);
   refreshLegendDefault();
 
   if (resetView) {
     setInitialForecastView(payload);
     positionNewsMarkers();
+    scheduleForecastSegmentLabelPositioning();
     return;
   }
 
   if (savedRange && typeof timeScale.setVisibleLogicalRange === "function") {
     timeScale.setVisibleLogicalRange(savedRange);
     positionNewsMarkers();
+    scheduleForecastSegmentLabelPositioning();
     return;
   }
   timeScale.fitContent();
   positionNewsMarkers();
+  scheduleForecastSegmentLabelPositioning();
 }
 
 function renderBacktestChart(payload, savedRange = null) {
+  chartMode = "backtest";
   activeBacktestPayload = payload;
   activeBacktestOriginMarker = {
     time: payload.origin_time,
@@ -2178,19 +2877,28 @@ function renderBacktestChart(payload, savedRange = null) {
   renderChart(payload, false, { mode: "backtest" });
   if (savedRange && typeof chartRef.timeScale().setVisibleLogicalRange === "function") {
     chartRef.timeScale().setVisibleLogicalRange(savedRange);
+    scheduleForecastSegmentLabelPositioning();
   }
-  renderMarketContextPanel(latestContextPayload);
   setBacktestStatus(`${t("actual")} ${payload.backtest?.actual_future_rows || 0}/${payload.backtest?.horizon || 0}`, "active");
   updateBacktestControls();
 }
 
 async function runSelectedBacktest() {
-  if (!selectedBacktestTime) return;
-  const intervalInput = document.getElementById("interval-input");
-  const horizonInput = document.getElementById("horizon-input");
+  chartMode = "backtest";
+  if (!selectedBacktestTime) {
+    setBacktestStatus(t("backtestClickGuide"), "guide");
+    updateBacktestControls();
+    return;
+  }
+  const originTime = selectedBacktestTime;
+  const backtestReqId = ++backtestRequestVersion;
+  clearDashboardAnalysisPanels();
+  lastAnalysisKey = "";
+  analysisRequestVersion += 1;
+  pendingAnalysisRefresh = null;
   const symbol = currentOilSymbol();
-  const interval = intervalInput?.value || "1d";
-  const horizon = horizonInput?.value || "";
+  const interval = currentInterval();
+  const horizon = currentHorizon();
   const selectedModels = forecastModelsQuery();
   const savedRange =
     chartRef && typeof chartRef.timeScale().getVisibleLogicalRange === "function"
@@ -2199,29 +2907,51 @@ async function runSelectedBacktest() {
   setBacktestStatus(t("loading"), "loading");
   setLoadingState("backtest", true);
   try {
-    const payload = await loadBacktestVisualization(symbol, interval, selectedBacktestTime, selectedModels, horizon);
+    const payload = await loadBacktestVisualization(symbol, interval, originTime, selectedModels, horizon);
+    if (backtestReqId !== backtestRequestVersion || String(selectedBacktestTime) !== String(originTime)) return;
     renderBacktestChart(payload, savedRange);
-    refreshModelCommentary(symbol, interval, selectedModels, selectedBacktestTime, requestVersion, horizon);
+    refreshDashboardPanels(symbol, interval, selectedModels, horizon, requestVersion, {
+      forceContext: true,
+      forceCommentary: true,
+      forceReport: true,
+      originTime,
+    });
     setMetrics(payload.metrics, payload.updated_at, payload.forecast_horizon, payload.confidence_level);
     setDataStatusBadge(payload.data_status);
     setForecastBadges(payload);
     setForecastNotices(payload);
   } catch (error) {
+    if (backtestReqId !== backtestRequestVersion) return;
     console.error(error);
     setBacktestStatus(error?.message || "Failed", "error");
   } finally {
-    setLoadingState("backtest", false);
-    updateBacktestControls();
+    if (backtestReqId === backtestRequestVersion) {
+      setLoadingState("backtest", false);
+      updateBacktestControls();
+    }
   }
 }
 
 function exitBacktestMode() {
+  chartMode = "live";
+  backtestRequestVersion += 1;
+  setLoadingState("backtest", false);
   activeBacktestPayload = null;
   activeBacktestOriginMarker = null;
+  latestContextPayload = null;
+  latestCommentaryPayload = null;
+  latestReportPayload = null;
+  latestAnalysisPayloadKey = "";
+  lastContextKey = "";
+  lastAnalysisKey = "";
+  analysisRequestVersion += 1;
+  pendingAnalysisRefresh = null;
+  closeNewsPopover();
+  renderNewsTimeline(null);
   setBacktestStatus("");
   if (latestPayload) {
     const symbol = currentOilSymbol();
-    const interval = document.getElementById("interval-input").value || "1d";
+    const interval = currentInterval();
     activeDataKey = null;
     initDashboard(symbol, interval, { force: true });
   }
@@ -2229,87 +2959,131 @@ function exitBacktestMode() {
 }
 
 function refreshDashboardPanels(symbol, interval, selectedModels, selectedHorizon, reqId = requestVersion, options = {}) {
-  const panelKey = `${symbol}|${interval}|${selectedModels}|${selectedHorizon}`;
+  const originTime = options.originTime || null;
+  const panelKey = `${symbol}|${interval}|${selectedModels}|${selectedHorizon}|${originTime || ""}`;
+  const analysisKey = dashboardPanelKey(symbol, interval, selectedModels, selectedHorizon, originTime, currentLanguage);
   const now = Date.now();
-  const shouldRefreshContext =
-    options.forceContext || panelKey !== lastContextKey || now - lastContextLoadMs > CONTEXT_REFRESH_MS;
-  if (shouldRefreshContext && !contextRequestInFlight) {
-    lastContextKey = panelKey;
-    lastContextLoadMs = now;
-    contextRequestInFlight = true;
-    setLoadingState("context", true);
-    const mode = document.getElementById("context-mode");
-    if (mode) mode.textContent = t("loadingNews");
-    loadMarketContext(symbol, interval, selectedModels, selectedHorizon)
-      .then((contextPayload) => {
-        if (reqId !== requestVersion) return;
-        renderMarketContextPanel(contextPayload);
-        renderContextMarkers(contextPayload);
-      })
-      .catch(() => {
-        if (latestContextPayload) {
-          renderMarketContextPanel(latestContextPayload);
-          renderContextMarkers(latestContextPayload);
-          return;
-        }
+  const shouldRefreshAnalysis =
+    options.forceContext ||
+    options.forceCommentary ||
+    options.forceReport ||
+    analysisKey !== lastAnalysisKey ||
+    now - lastAnalysisLoadMs > DASHBOARD_ANALYSIS_REFRESH_MS ||
+    !latestContextPayload ||
+    !latestCommentaryPayload ||
+    !latestReportPayload;
+  if (!shouldRefreshAnalysis) {
+    const matchingAnalysisPayload = latestAnalysisPayloadKey === analysisKey;
+    renderMarketContextPanel(matchingAnalysisPayload ? latestContextPayload : null);
+    renderContextMarkers(matchingAnalysisPayload ? latestContextPayload : null);
+    renderModelCommentary(matchingAnalysisPayload ? latestCommentaryPayload : null);
+    renderForecastReport(matchingAnalysisPayload ? latestReportPayload : null);
+    return;
+  }
+
+  if (analysisRequestInFlight) {
+    pendingAnalysisRefresh = {
+      symbol,
+      interval,
+      selectedModels,
+      selectedHorizon,
+      reqId,
+      options: {
+        ...options,
+        forceContext: true,
+        forceCommentary: true,
+        forceReport: true,
+      },
+    };
+    latestAnalysisPayloadKey = "";
+    renderMarketContextLoading();
+    renderModelCommentaryLoading();
+    renderForecastReportLoading();
+    renderContextMarkers(null);
+    return;
+  }
+
+  lastAnalysisKey = analysisKey;
+  lastAnalysisLoadMs = now;
+  lastContextKey = panelKey;
+  lastCommentaryKey = analysisKey;
+  lastReportKey = analysisKey;
+  lastContextLoadMs = now;
+  lastCommentaryLoadMs = now;
+  const analysisReqId = ++analysisRequestVersion;
+  activeAnalysisRequestId = analysisReqId;
+  const languageAtRequest = currentLanguage;
+  analysisRequestInFlight = true;
+  contextRequestInFlight = true;
+  commentaryRequestInFlight = true;
+  reportRequestInFlight = true;
+  setLoadingState("context", true);
+  setLoadingState("commentary", true);
+  setLoadingState("report", true);
+  renderMarketContextLoading();
+  renderModelCommentaryLoading();
+  renderForecastReportLoading();
+  loadDashboardAnalysis(symbol, interval, selectedModels, selectedHorizon, originTime, languageAtRequest)
+    .then((analysis) => {
+      if (analysisReqId !== activeAnalysisRequestId || !isDashboardAnalysisRequestCurrent(analysisKey, languageAtRequest, reqId)) return;
+      latestAnalysisPayloadKey = analysisKey;
+      renderMarketContextPanel(analysis.market_context || null);
+      renderContextMarkers(analysis.market_context || null);
+      renderModelCommentary(analysis.commentary || unavailableCommentary());
+      renderForecastReport(analysis.report || null);
+    })
+    .catch((error) => {
+      if (analysisReqId !== activeAnalysisRequestId || !isDashboardAnalysisRequestCurrent(analysisKey, languageAtRequest, reqId)) return;
+      if (latestAnalysisPayloadKey === analysisKey && latestContextPayload) {
+        renderMarketContextPanel(latestContextPayload);
+        renderContextMarkers(latestContextPayload);
+      } else {
         renderMarketContextPanel(null);
         renderContextMarkers(null);
-      })
-      .finally(() => {
-        contextRequestInFlight = false;
-        setLoadingState("context", false);
+      }
+      renderModelCommentary(unavailableCommentary(error?.message || t("aiUnavailable")));
+      renderForecastReport({
+        executive_summary: t("reportUnavailable"),
+        key_metrics: {},
+        sections: [],
+        warnings: [String(error?.message || error)],
+        recommendation_note: "",
       });
-  } else {
-    renderMarketContextPanel(latestContextPayload);
-    renderContextMarkers(latestContextPayload);
-  }
-
-  const commentaryKey = `${panelKey}|${currentLanguage}`;
-  const shouldRefreshCommentary =
-    options.forceCommentary || commentaryKey !== lastCommentaryKey || now - lastCommentaryLoadMs > COMMENTARY_REFRESH_MS;
-  if (shouldRefreshCommentary) {
-    lastCommentaryKey = commentaryKey;
-    lastCommentaryLoadMs = now;
-    const commentaryReqId = ++commentaryRequestVersion;
-    const languageAtRequest = currentLanguage;
-    commentaryRequestInFlight = true;
-    setLoadingState("commentary", true);
-    renderModelCommentaryLoading();
-    loadModelCommentary(symbol, interval, selectedModels, null, selectedHorizon, languageAtRequest)
-      .then((commentary) => {
-        if (reqId !== requestVersion || commentaryReqId !== commentaryRequestVersion || currentLanguage !== languageAtRequest) return;
-        renderModelCommentary(commentary);
-      })
-      .catch(() => {
-        if (reqId !== requestVersion || commentaryReqId !== commentaryRequestVersion || currentLanguage !== languageAtRequest) return;
-        if (latestCommentaryPayload) {
-          renderModelCommentary(latestCommentaryPayload);
-          return;
-        }
-        renderModelCommentary({
-          summary: currentLanguage === "ko" ? "모델 해설을 불러오지 못했습니다." : "Model commentary unavailable.",
-          risk_notes: [],
-          warnings: [],
-          llm_used: false,
-        });
-      })
-      .finally(() => {
-        if (commentaryReqId !== commentaryRequestVersion) return;
-        commentaryRequestInFlight = false;
-        setLoadingState("commentary", false);
-      });
-  } else {
-    renderModelCommentary(latestCommentaryPayload);
-  }
-
-  const reportKey = `${panelKey}|${latestPayload?.updated_at || ""}|${currentLanguage}`;
-  const shouldRefreshReport = options.forceReport || reportKey !== lastReportKey || !latestReportPayload;
-  if (shouldRefreshReport && !reportRequestInFlight) {
-    lastReportKey = reportKey;
-    void refreshForecastReport(symbol, interval, selectedModels, selectedHorizon, reqId);
-  } else if (!reportRequestInFlight) {
-    renderForecastReport(latestReportPayload);
-  }
+    })
+    .finally(() => {
+      if (analysisReqId !== activeAnalysisRequestId) return;
+      analysisRequestInFlight = false;
+      activeAnalysisRequestId = 0;
+      contextRequestInFlight = false;
+      commentaryRequestInFlight = false;
+      reportRequestInFlight = false;
+      setLoadingState("context", false);
+      setLoadingState("commentary", false);
+      setLoadingState("report", false);
+      const pending = pendingAnalysisRefresh;
+      pendingAnalysisRefresh = null;
+      if (
+        pending &&
+        pending.reqId === requestVersion &&
+        dashboardPanelKey(
+          pending.symbol,
+          pending.interval,
+          pending.selectedModels,
+          pending.selectedHorizon,
+          pending.options?.originTime || null,
+          currentLanguage,
+        ) === currentDashboardAnalysisKey()
+      ) {
+        refreshDashboardPanels(
+          pending.symbol,
+          pending.interval,
+          pending.selectedModels,
+          pending.selectedHorizon,
+          pending.reqId,
+          pending.options,
+        );
+      }
+    });
 }
 
 async function initDashboard(symbol, interval, options = {}) {
@@ -2317,8 +3091,7 @@ async function initDashboard(symbol, interval, options = {}) {
   chartRequestInFlight = true;
   setLoadingState("chart", true);
   const reqId = ++requestVersion;
-  const horizonInput = document.getElementById("horizon-input");
-  const selectedHorizon = horizonInput ? horizonInput.value || "" : "";
+  const selectedHorizon = currentHorizon();
   await loadModelCatalog(interval, selectedHorizon);
   if (reqId !== requestVersion) {
     chartRequestInFlight = false;
@@ -2330,12 +3103,6 @@ async function initDashboard(symbol, interval, options = {}) {
     const payload = await loadData(symbol, interval, selectedModels, selectedHorizon);
     if (reqId !== requestVersion) return;
     const canonicalSymbol = DEFAULT_SYMBOL;
-    if (payload.symbol_resolved) {
-      const symbolInput = document.getElementById("symbol-input");
-      if (symbolInput && symbolInput.value !== DEFAULT_SYMBOL) {
-        symbolInput.value = DEFAULT_SYMBOL;
-      }
-    }
     setMetrics(
       payload.metrics,
       payload.updated_at,
@@ -2353,15 +3120,15 @@ async function initDashboard(symbol, interval, options = {}) {
       activeDataKey = nextDataKey;
     } catch (chartError) {
       console.error(chartError);
-      document.getElementById("chart-updated-value").textContent = `${new Date(
-        payload.updated_at,
-      ).toLocaleString()} (chart render failed)`;
+      const updated = document.getElementById("chart-updated-value");
+      if (updated) updated.textContent = `${formatDateTimeValue(payload.updated_at)} (chart render failed)`;
       setStatus(`차트 렌더링 실패: ${chartError?.message || "브라우저 콘솔을 확인하세요."}`, "error");
     }
   } catch (error) {
     if (reqId !== requestVersion) return;
     console.error(error);
-    document.getElementById("chart-updated-value").textContent = "Updated -";
+    lastChartUpdatedAt = null;
+    setChartUpdatedValue();
     setStatus(`API 요청 실패: ${error?.message || "서버 로그를 확인하세요."}`, "warning");
     setInfoMessages([]);
   } finally {
@@ -2372,15 +3139,13 @@ async function initDashboard(symbol, interval, options = {}) {
 }
 
 function bindControls() {
-  const intervalInput = document.getElementById("interval-input");
-  const horizonInput = document.getElementById("horizon-input");
   const languageToggle = document.getElementById("language-toggle");
-  const languageToggleShell = document.querySelector(".language-toggle");
+  const languageToggleShell = document.querySelector(".language-mode-toggle");
   const backtestModeToggle = document.getElementById("backtest-mode-toggle");
   const reportButton = document.getElementById("report-download-button");
   const triggerSearch = () => {
     const symbol = currentOilSymbol();
-    const interval = intervalInput?.value || "1d";
+    const interval = currentInterval();
     const catalogEntry = null;
     if (catalogEntry && catalogEntry.status === "artifact_missing") {
       const label = MODEL_LABELS[catalogEntry.id] || catalogEntry.id;
@@ -2393,11 +3158,24 @@ function bindControls() {
     }
     // Force new chart request even for same symbol/interval.
     activeDataKey = null;
+    chartMode = "live";
     selectedBacktestTime = null;
     activeBacktestPayload = null;
     activeBacktestOriginMarker = null;
+    backtestRequestVersion += 1;
+    setLoadingState("backtest", false);
+    latestContextPayload = null;
+    latestCommentaryPayload = null;
+    latestReportPayload = null;
+    latestAnalysisPayloadKey = "";
+    lastContextKey = "";
+    closeNewsPopover();
+    renderNewsTimeline(null);
     lastCommentaryKey = "";
     lastReportKey = "";
+    lastAnalysisKey = "";
+    analysisRequestVersion += 1;
+    pendingAnalysisRefresh = null;
     reportRequestVersion += 1;
     reportRequestInFlight = false;
     latestReportPayload = null;
@@ -2413,13 +3191,16 @@ function bindControls() {
       exitBacktestMode();
       return;
     }
-    if (!selectedBacktestTime) {
-      backtestModeToggle.checked = true;
-      setBacktestStatus(t("selectOriginFirst"), "error");
-      updateBacktestControls();
-      return;
-    }
-    runSelectedBacktest();
+    requestVersion += 1;
+    chartMode = "backtest";
+    activeBacktestPayload = null;
+    activeBacktestOriginMarker = null;
+    clearDashboardAnalysisPanels();
+    lastAnalysisKey = "";
+    analysisRequestVersion += 1;
+    pendingAnalysisRefresh = null;
+    updateBacktestControls();
+    void runSelectedBacktest();
   });
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
@@ -2428,8 +3209,6 @@ function bindControls() {
     }
   });
   reportButton?.addEventListener("click", printForecastReportPdf);
-  intervalInput.addEventListener("change", triggerSearch);
-  horizonInput?.addEventListener("change", triggerSearch);
   languageToggle?.addEventListener("change", () => {
     setLanguage(languageToggle.checked ? "en" : "ko");
   });
@@ -2454,19 +3233,19 @@ function startAutoRefresh() {
     clearInterval(refreshTimer);
   }
   refreshTimer = setInterval(() => {
-    if (activeBacktestPayload) return;
+    if (chartMode === "backtest" || activeBacktestPayload) return;
     const symbol = currentOilSymbol();
-    const interval = document.getElementById("interval-input").value || "1d";
+    const interval = currentInterval();
     initDashboard(symbol, interval, { force: false });
   }, PRICE_REFRESH_MS);
 }
 
 async function bootDashboard() {
   bindControls();
-  await loadModelCatalog();
+  await loadModelCatalog(currentInterval(), currentHorizon());
   initDashboard(
     currentOilSymbol(),
-    document.getElementById("interval-input").value || "1d",
+    currentInterval(),
     { force: true },
   );
   startAutoRefresh();

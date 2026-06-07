@@ -48,6 +48,7 @@ class Settings(BaseModel):
     llm_context_mode: str = Field(default="google_generative")
     enable_external_features: bool = Field(default=False)
     enable_cross_asset_features: bool = Field(default=False)
+    enable_online_residual_calibration: bool = Field(default=False)
     app_version: str = Field(default="0.2.0")
 
     @field_validator("app_env")
@@ -102,6 +103,7 @@ class Settings(BaseModel):
             llm_context_mode=source.get("LLM_CONTEXT_MODE", "google_generative"),
             enable_external_features=_parse_bool(source.get("ENABLE_EXTERNAL_FEATURES"), False),
             enable_cross_asset_features=_parse_bool(source.get("ENABLE_CROSS_ASSET_FEATURES"), False),
+            enable_online_residual_calibration=_parse_bool(source.get("ENABLE_ONLINE_RESIDUAL_CALIBRATION"), False),
             app_version=source.get("APP_VERSION", "0.2.0"),
         )
 

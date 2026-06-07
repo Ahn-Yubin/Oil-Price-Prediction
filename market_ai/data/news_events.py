@@ -129,6 +129,43 @@ GEOPOLITICAL_TERMS = (
     "strike",
 )
 
+GEOPOLITICAL_SUPPLY_SHOCK_TERMS = (
+    "war",
+    "conflict",
+    "military conflict",
+    "missile",
+    "missiles",
+    "drone",
+    "drones",
+    "attack",
+    "attacks",
+    "strike",
+    "strikes",
+    "retaliation",
+    "blockade",
+    "hormuz",
+    "strait of hormuz",
+    "red sea",
+    "middle east",
+    "iran",
+    "israel",
+    "sanction",
+    "sanctions",
+    "embargo",
+    "tanker",
+    "supply disruption",
+    "supply risk",
+)
+
+SUPPLY_RISK_RELIEF_TERMS = (
+    "ceasefire",
+    "peace deal",
+    "truce",
+    "de-escalation",
+    "deescalation",
+    "talks resume",
+)
+
 
 def load_news_csv(path: str | Path) -> pd.DataFrame:
     frame = read_table(path)
@@ -157,7 +194,9 @@ def _local_rule_event_from_news(row: dict[str, Any]) -> MarketEvent:
     bullish_hits = sum(1 for term in BULLISH_OIL_TERMS if term in text)
     bearish_hits = sum(1 for term in BEARISH_OIL_TERMS if term in text)
     high_impact_hits = sum(1 for term in HIGH_IMPACT_TERMS if term in text)
-    impact = min(0.25 + 0.12 * max(bullish_hits, bearish_hits) + 0.08 * high_impact_hits, 0.85)
+    supply_shock_hits = sum(1 for term in GEOPOLITICAL_SUPPLY_SHOCK_TERMS if term in text)
+    supply_relief_hits = sum(1 for term in SUPPLY_RISK_RELIEF_TERMS if term in text)
+    impact = min(0.25 + 0.12 * max(bullish_hits, bearish_hits) + 0.08 * high_impact_hits + 0.05 * supply_shock_hits, 0.92)
     bias = "neutral"
     if bullish_hits > bearish_hits:
         bias = "bullish"
@@ -165,7 +204,18 @@ def _local_rule_event_from_news(row: dict[str, Any]) -> MarketEvent:
         bias = "bearish"
     elif bullish_hits and bearish_hits:
         bias = "mixed"
+    if supply_shock_hits and not supply_relief_hits and bearish_hits <= bullish_hits + 1:
+        bias = "bullish"
+        impact = max(impact, min(0.70 + 0.04 * supply_shock_hits, 0.94))
+    elif supply_relief_hits and bearish_hits >= bullish_hits:
+        bias = "bearish"
+        impact = max(impact, 0.65)
     event_type = (
+        "geopolitical_supply_shock"
+        if supply_shock_hits and not supply_relief_hits
+        else "geopolitical_supply_relief"
+        if supply_relief_hits
+        else
         "geopolitical_oil_news"
         if any(term in text for term in GEOPOLITICAL_TERMS)
         else "energy_news"

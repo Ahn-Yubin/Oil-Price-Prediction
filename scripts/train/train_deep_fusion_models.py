@@ -12,6 +12,7 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -83,6 +84,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--synthetic", action="store_true")
     parser.add_argument("--allow-synthetic-fallback", action="store_true")
     parser.add_argument("--metadata-only", action="store_true")
+    parser.add_argument(
+        "--fit-final-all-data",
+        action="store_true",
+        help="Train the deployable artifact on every generated sample after separate holdout evaluation has been recorded.",
+    )
     parser.add_argument("--progress-every-batches", type=int, default=10)
     parser.add_argument("--no-progress", action="store_true")
     return parser.parse_args()
@@ -145,6 +151,13 @@ def _git_commit() -> str | None:
 
 def _sample_time_bounds(dataset) -> tuple[str | None, str | None]:
     values = [sample.as_of_time.isoformat() for sample in dataset.samples]
+    if not values:
+        return None, None
+    return min(values), max(values)
+
+
+def _sample_time_bounds_for_indices(dataset, indices) -> tuple[str | None, str | None]:
+    values = [dataset.samples[int(idx)].as_of_time.isoformat() for idx in indices if 0 <= int(idx) < len(dataset.samples)]
     if not values:
         return None, None
     return min(values), max(values)
@@ -537,7 +550,8 @@ def train_one(
     metadata_path = metadata_dir / deep_metadata_name(model_name, args.interval, config.horizon)
     if artifact_path.exists() and not args.force and not args.quick_test:
         raise RuntimeError(f"Artifact already exists: {artifact_path}. Use --force to overwrite.")
-    train_start, train_end = _sample_time_bounds(dataset)
+    sample_start, sample_end = _sample_time_bounds(dataset)
+    train_start, train_end = _sample_time_bounds_for_indices(dataset, dataset.train_indices)
     synthetic_used = bool(data_report.get("synthetic_used"))
     status = "smoke_only" if args.quick_test else "synthetic_only" if synthetic_used else "available"
     if args.metadata_only:
@@ -551,14 +565,48 @@ def train_one(
         "horizon": config.horizon,
         "lookback": config.lookback,
         "target": "volatility_scaled_cumulative_log_return_distribution",
-        "optimization_metrics": ["sse", "mse", "rmse", "mae", "r2", "mape", "smape", "directional_accuracy"],
-        "expert_systems": ["lstm", "tcn", "attention", "context", "pattern", "motif"]
+        "optimization_metrics": [
+            "sse",
+            "mse",
+            "rmse",
+            "mae",
+            "r2",
+            "mape",
+            "smape",
+            "directional_accuracy",
+            "step_directional_accuracy",
+            "final_ape_pct",
+            "turn_error",
+            "range_ratio",
+            "shape_score",
+        ],
+        "loss_terms": [
+            "pinball_quantile",
+            "median_huber",
+            "step_return_huber",
+            "terminal_huber",
+            "path_shape_huber",
+            "path_range_huber",
+            "step_volatility_huber",
+            "curvature_huber",
+            "gaussian_tail_path",
+            "range_shortfall_tail",
+            "step_direction_bce",
+            "terminal_direction_bce",
+            "future_volatility_huber",
+            "aux_path_range_huber",
+            "shock_probability_bce",
+            "quantile_monotonicity_penalty",
+        ],
+        "expert_systems": ["lstm", "tcn", "attention", "context", "pattern", "motif", "event_shock"]
         if model_name == "oil_context_fusion"
         else None,
         "feature_set": dataset.feature_version,
         "asset_universe": config.symbols,
         "supported_intervals": [args.interval],
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "sample_start": sample_start,
+        "sample_end": sample_end,
         "train_start": train_start,
         "train_end": train_end,
         "training_cutoff": train_end,
@@ -569,6 +617,7 @@ def train_one(
         "data_source": data_report.get("source"),
         "synthetic_used": synthetic_used,
         "event_context_enabled": bool(config.event_context_enabled),
+        "fit_final_all_data": bool(args.fit_final_all_data),
         "events_path": list(data_report.get("events_path") or []),
         "related_assets_enabled": bool(config.related_assets_enabled),
         "git_commit": _git_commit(),
@@ -663,6 +712,16 @@ def main() -> None:
         seed=args.seed,
     )
     dataset, data_report = build_dataset(args, symbols, config, progress_callback=progress_callback)
+    if args.fit_final_all_data:
+        dataset = DeepDataset(
+            samples=dataset.samples,
+            train_indices=np.arange(len(dataset.samples), dtype=np.int64),
+            validation_indices=np.asarray([], dtype=np.int64),
+            test_indices=np.asarray([], dtype=np.int64),
+            price_feature_names=dataset.price_feature_names,
+            cross_asset_feature_names=dataset.cross_asset_feature_names,
+            feature_version=dataset.feature_version,
+        )
     model_names = [args.model]
     reports = [train_one(model_name, args, dataset, config, data_report, progress_callback=progress_callback) for model_name in model_names]
     print(json.dumps({"trained": model_names, "reports": reports}, ensure_ascii=False, indent=2))

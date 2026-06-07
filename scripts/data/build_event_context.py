@@ -32,9 +32,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-root", default=str(DATA_ROOT))
     parser.add_argument("--progress-every", type=int, default=25, help="Print progress every N completed rows. LLM calls always print start/done.")
     parser.add_argument("--no-resume-cache", action="store_true", help="Ignore existing llm_context_cache.jsonl rows.")
-    parser.add_argument("--news-limit-per-context", type=int, default=5, help="Maximum recent news items passed into one symbol/date context.")
+    parser.add_argument("--news-limit-per-context", type=int, default=16, help="Maximum recent news items passed into one symbol/date context.")
     parser.add_argument("--llm-batch-size", type=int, default=1, help="Number of symbol/date contexts to encode in one external LLM request.")
     parser.add_argument("--llm-min-interval-seconds", type=float, default=0.0, help="Minimum seconds between external LLM requests for RPM limits.")
+    parser.add_argument(
+        "--allow-external-llm-fallback",
+        action="store_true",
+        help="Permit local_rules rows when an external LLM call fails. Production training builds should leave this off.",
+    )
     return parser.parse_args()
 
 
@@ -122,6 +127,7 @@ def main() -> None:
         news_limit_per_context=args.news_limit_per_context,
         llm_batch_size=args.llm_batch_size,
         llm_min_interval_seconds=args.llm_min_interval_seconds,
+        strict_external_llm=args.mode in {"openai_compatible", "google_generative"} and args.live and not args.allow_external_llm_fallback,
         progress_callback=_progress_logger(args.progress_every),
     )
     raw_path = data_root / "interim" / "events" / "combined_market_events.csv"

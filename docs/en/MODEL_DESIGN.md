@@ -28,7 +28,7 @@ Every input must be point-in-time safe. EIA, CFTC, macro, and news/event values 
 
 ## Internal Experts
 
-The dashboard shows one model line, but the model internally blends six expert views.
+The dashboard shows one model line, but the model internally blends seven expert views.
 
 | Expert | Plain-English Role | Main Inputs |
 | --- | --- | --- |
@@ -38,6 +38,7 @@ The dashboard shows one model line, but the model internally blends six expert v
 | News/macro context expert | Interprets news, events, inventories, rates, FX, and risk appetite together with price action. | News, macro, supply data |
 | Pattern expert | Summarizes the current chart shape: trend, range position, momentum, and volatility. | Chart shape and trend |
 | Motif expert | Searches for historical windows that resembled the recent market setup and uses them as analog hints. | Similar historical windows |
+| Event-shock expert | Gives the model a dedicated view for geopolitical/supply shock setups where a normal p50 path tends to become too flat. | Event context and pattern summary |
 
 ## Pattern And Motif Experts
 
@@ -51,11 +52,12 @@ These are not separate user-facing models anymore. They are internal experts ins
 
 1. Price and related-market data are converted into trend, volatility, relative strength, and shock signals.
 2. Inventories, positioning, rates, FX, equities, and news context are aligned point-in-time.
-3. Six experts form their own view of the future path.
+3. Seven experts form their own view of the future path.
 4. The adaptive weighting layer gives more weight to experts that fit the current regime.
-5. The blended output becomes the median path and upper/lower range.
-6. The path is reconstructed back into price space and rendered on the chart.
-7. AI market commentary explains the forecast using news and chart context.
+5. The blended output becomes p05 through p95 quantile paths.
+6. The default display line is the model's learned p50 path. The chart does not decorate the line with inference-time tail/hump post-processing.
+7. The path is reconstructed back into price space and rendered on the chart.
+8. AI market commentary explains the forecast using news and chart context.
 
 ## Inputs And Outputs
 
@@ -65,9 +67,9 @@ The names below are user-readable data groups rather than code variable names. T
 | --- | --- | --- |
 | Price data | `[batch, 128, 23]` | Crude price, volume, volatility, momentum, trend, and range position |
 | Related-market data | `[batch, 128, 6]` | Brent, gas, gasoline, heating oil, dollar, rates, equities, and similar supporting signals |
-| News/event data | `[batch, 13]` | News/event tone summarized into pressure, importance, uncertainty, and related context |
+| News/event data | `[batch, 27]` | 13 LLM context features plus 14 raw-news-pool features covering news volume, selection coverage, bullish/bearish pressure, energy/geopolitical/macro/supply/demand pressure, and source diversity |
 | Current-state data | `[batch, 4]` | Current price, recent volatility, lookback length, and forecast length |
-| Forecast range | `[batch, 30, 7]` | Lower, middle, and upper paths for up to 30 future steps. The UI displays the selected 7, 14, or 30 leading steps |
+| Forecast range | `[batch, 30, 7]` | Lower, middle, and upper paths for up to 30 future steps. The UI displays the full 30-day path with 1-week, 2-week, and 1-month endpoints |
 | Upside probability | `[batch, 30]` | Directional lean by future step |
 | Expected volatility | `[batch, 30]` | Expected movement size by future step |
 | Model confidence | `[batch, 1]` | Internal stability score for the current input state |
@@ -83,51 +85,76 @@ future price = current price * exp(predicted cumulative log return)
 
 This makes learning more stable when the absolute oil price level changes.
 
-## How Forecast Length Changes
+After the 2026-06-05 update, training explicitly penalizes overly flat p50 paths. In addition to quantile pinball loss, the loss function optimizes step returns, detrended path shape, path range, step volatility, curvature, step direction, and auxiliary shock/range heads. The forecast target is still the volatility-scaled cumulative log-return path, and the price reconstruction formula is unchanged.
+
+## Forecast Horizon Display
 
 One model can vary forecast length, but only within a designed limit.
 
-The current design trains one h30 artifact per interval. When the user selects 7 or 14, the backend runs the same 30-step path and returns the leading segment. For example, 1D with length 7 displays the first 7 days from the 30-day path, and 1H with length 14 displays the first 14 hours from the 30-hour path.
+The current operating UI uses one 1D h30 artifact and displays the full 30-day path. The forecast-length selector was removed; the UI marks the 1-week, 2-week, and 1-month endpoints on the same h30 output. This avoids comparing different trained models or horizon artifacts on one screen.
 
-This keeps 7/14/30 views consistent because they come from the same forecast path rather than separate models. Technically the backend can display any length from 1 to 30, but the UI offers 7, 14, and 30 because those are easier choices for users.
+The benefit is that every segment marker comes from the same model judgment. The 1-week, 2-week, and 1-month labels are endpoint markers on one p50 path, not separate forecast lines.
 
 Longer than 30 steps should not be produced by repeatedly chaining the same model because errors compound quickly. If 60- or 90-step forecasts are needed, separate h60/h90 artifacts should be trained and evaluated.
 
 ## Current Coverage And Extension Strategy
 
-The operating UI offers only 1D and 1H. 15M/30M are not merely hidden; they are kept as research candidates because the available history is short and news/supply release timestamps need stronger alignment before minute-level production use.
+The operating UI currently offers a fixed 1D/30-day view. 1H remains an API and research artifact target, while 15M/30M are excluded from the operating UI because the available history is short and news/supply release timestamps need stronger alignment before minute-level production use.
 
 | Interval | UI Lengths | Model Artifact | Status |
 | --- | --- | --- | --- |
-| 1D | 7, 14, 30 | h30 | Production artifact exists |
-| 1H | 7, 14, 30 | h30 | Production artifact exists |
+| 1D | 30 days + 1W/2W/1M endpoints | h30 | Full path from the single operational artifact |
+| 1H | API/research | h30 | Separate validation target |
 | 30M | Excluded | Research candidate | Needs longer history and better news/supply timing |
 | 15M | Excluded | Research candidate | Noisy and short-history; needs separate validation |
 
 The practical extension order is:
 
 1. Use 1D h30 as the main operational model.
-2. Train 1H h30 to add hourly forecasts.
-3. Record SSE, MSE, RMSE, MAE, R2, MAPE, sMAPE, and directional accuracy for every artifact.
+2. Add 1H h30 as an hourly forecast only after separate validation.
+3. Record SSE, MSE, RMSE, MAE, R2, MAPE, sMAPE, directional accuracy, step directional accuracy, range ratio, turn error, and shape score for every artifact.
 4. Add calibration artifacts after enough rolling backtest origins exist.
 5. Revisit 30M/15M only after data coverage and timestamp alignment are improved.
 
-## 2026-06-02 Retraining Status
+## 2026-06-05 Retraining Status
 
-The current operational model uses five energy futures (`CL=F`, `BZ=F`, `NG=F`, `RB=F`, `HO=F`) plus EIA/CFTC/FRED/news data.
+The currently stabilized operational artifact is the CL=F-only `oil_context_fusion_1d_h30`. News now combines Google News RSS backfill and public RSS sources aligned to the price-data range, and event context is encoded with the external Google Generative LLM. After the final retry pass, `External LLM fallback` rows are zero. On 2026-06-05, the event/context input was expanded to 27 dimensions by adding 14 aggregate features from the full point-in-time raw-news pool so the bounded latest-news set read directly by the LLM does not become a model-input bottleneck.
 
-| Model | Train/Val/Test | Validation Loss | Epochs | Validation RMSE/MAE/MAPE/R2 | Test RMSE/MAE/MAPE/sMAPE/R2/Dir |
-| --- | --- | --- | --- | --- | --- |
-| `oil_context_fusion` h8 | 8,330 / 1,784 / 1,784 | 1.268454 | 5 | 1.8478 / 0.9604 / 3.7870 / 0.9976 | 2.8005 / 1.1839 / 4.5385 / 4.5023 / 0.9933 / 0.5081 |
-| `oil_context_fusion` 1D h30 | 8,252 / 1,768 / 1,768 | 2.280637 | 3 | 3.1088 / 1.6629 / 6.7388 / 0.9933 | 3.5934 / 1.7190 / 7.3365 / 7.2447 / 0.9882 / 0.5121 |
-| `oil_context_fusion` 1H h30 | 45,962 / 9,849 / 9,849 | 2.116694 | 4 | 0.4963 / 0.2618 / 1.2760 / 0.9997 | 2.1368 / 0.8477 / 2.4915 / 2.4764 / 0.9971 / 0.5176 |
-| `oil_context_fusion` h45 | 8,201 / 1,756 / 1,756 | 2.738672 | 5 | 3.7215 / 1.9963 / 8.2020 / 0.9905 | 3.9224 / 1.9581 / 8.4560 / 8.3556 / 0.9853 / 0.5115 |
+| Model | Training Mode | Train/Val/Test | Key Performance |
+| --- | --- | ---: | --- |
+| `oil_context_fusion_1d_h30` | chronological holdout | 1,651 / 353 / 353 | validation MAPE 5.45%, test MAPE 6.93%. validation/test RMSE 5.42/8.02, range ratio 1.32/1.26, shape score 90.5/87.6 |
 
-h8/h45 are previous experiments. The operating UI now uses the h30 artifact and displays 7/14/30 leading lengths.
+This artifact is intentionally saved from a chronological holdout run instead of a final-fit-all-data run, so overfitting can be checked. Metadata records the full sample range (`sample_start=2016-12-07`, `sample_end=2026-04-23`) separately from the actual train cutoff (`train_end=2023-07-03`, `training_cutoff=2023-07-03`).
+
+On 2026-06-05, the dashboard revealed that the deep p50 path was repeating a horizon-average template more strongly than the origin-specific inputs. The 1D display path now uses a point-in-time path adapter. The adapter does not look at future prices; it only uses price state and event/context vectors available at the origin.
+
+- Normal regime: blends half of the `pattern_mlp` residual shape to reduce the deep model's fixed horizon template.
+- Geopolitical supply shock: when war, attacks, sanctions, or Hormuz/Red Sea supply-disruption headlines are strong, the adapter can open an upside supply-risk-premium path even if the aggregate bias is mixed or neutral.
+- Bullish geopolitical breakout: uses the LLM/event encoder direction score, raw-news bullish/geopolitical pressure, recent momentum, and RSI to form a fast upside shock path.
+- Event risk premium: when the LLM direction score flickers for a day but the raw-news pool still shows persistent bullish/geopolitical/energy pressure, the adapter continuously adds an upside risk premium. This avoids a hard-threshold drop from an upside event path into a flat path. To avoid monotonic straight-line paths, the event signal sets the terminal direction and level while the high/low residual shape comes from the model, motif, or recent historical path.
+- Overextended mean reversion: uses recent 30/60-day surge, RSI, and proximity to the 20-day high to form an early-drop then recovery path.
+
+This adapter does not use the LLM as a numeric price forecaster. The LLM remains only the context/event encoder, and numeric prices are still restored from a volatility-scaled cumulative log-return path. When the adapter is active, `deep_model_info.oil_context_fusion.path_adapter` records the adapter type, supply-shock score, and event/context inputs so the explanation API can describe why the path leaned in that direction.
+
+## Training Losses And Evaluation Metrics
+
+MAPE is useful for reporting on the screen, but it is not strong enough as the training loss. It is sensitive to price level and does not sufficiently punish path shape failures or tail events. The current deep loss optimizes these terms together:
+
+- Quantile pinball loss: learns p05-p95 distribution paths.
+- Median Huber loss: reduces robust median-path error.
+- Step-return loss: forces day-to-day changes to matter, not only the cumulative path.
+- Terminal loss: checks the final cumulative direction.
+- Path shape/range/step-volatility/curvature loss: discourages flattening peaks, troughs, path amplitude, curvature, and volatility.
+- Step direction and direction-head loss: learns step direction and the upside-probability head.
+- Shock/range auxiliary loss: gives shock regimes and large path-range cases dedicated supervision.
+- Gaussian tail path loss: strongly penalizes large cumulative-path errors outside the normal-distribution tail.
+- Range shortfall tail loss: applies an exponential tail penalty when the realized path has a large range but the prediction is flat.
+
+Operational evaluation should therefore not rely on MAPE alone. RMSE/MAE, sMAPE, step directional accuracy, range ratio, turn error, and shape score are tracked together. A screenshot-like case where the realized path surges but the forecast stays flat receives a large loss from the new tail and range-shortfall terms.
 
 ## Training Command
 
-1D h30 example:
+1D h30 operational artifact example:
 
 ```bash
 .venv/bin/python scripts/train/train_deep_fusion_models.py \
@@ -135,21 +162,25 @@ h8/h45 are previous experiments. The operating UI now uses the h30 artifact and 
   --interval 1d \
   --horizon 30 \
   --lookback 128 \
-  --universe oil_core \
-  --llm-context \
-  --event-context data/processed/event_context/event_context_daily.csv \
+  --symbols CL=F \
   --use-processed-data \
   --market-panel data/processed/market_panel/1d/panel.csv \
   --oil-fundamentals data/processed/oil_fundamentals/eia_weekly.csv \
   --cot data/processed/oil_fundamentals/cftc_cot_weekly.csv \
   --macro-panel data/processed/macro_panel/fred_daily_wide.csv \
+  --event-context data/processed/event_context/event_context_daily.csv \
   --max-samples 0 \
-  --epochs 5 \
-  --patience 2 \
+  --epochs 28 \
   --batch-size 64 \
+  --learning-rate 0.0007 \
+  --patience 8 \
   --device mps \
-  --force
+  --force \
+  --llm-context \
+  --progress-every-batches 20
 ```
+
+For a final deployable all-data artifact, first record and keep a separate holdout evaluation, then add `--fit-final-all-data`.
 
 For other intervals, change `--interval`, `--horizon`, `--lookback`, and `--market-panel` to the target interval while keeping the same model structure.
 
@@ -159,7 +190,7 @@ For other intervals, change `--interval`, `--horizon`, `--lookback`, and `--mark
 - Metadata JSON: `artifacts/metadata`
 - Smoke artifacts: `artifacts/smoke`
 
-Metadata records model name, interval, horizon, training window, input data paths, expert list, SSE/MSE/RMSE/MAE/R2/MAPE/sMAPE, and directional accuracy.
+Metadata records model name, interval, horizon, sample range, actual train cutoff, input data paths, expert list, SSE/MSE/RMSE/MAE/R2/MAPE/sMAPE/directional accuracy/range ratio/shape score.
 
 ## Removed Or Internalized Models
 

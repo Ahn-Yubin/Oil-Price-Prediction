@@ -6,19 +6,19 @@ This document is the current canonical status map for the repository. Older audi
 
 The project has moved back to a WTI oil (`CL=F`) forecasting-only dashboard with one operational user-facing model. FastAPI backend, `market_ai` domain logic, frontend chart overlay, data CLIs, deep learning training CLIs, and model artifacts/metadata are separated.
 
-The currently usable training data includes price panels, EIA weekly petroleum data, CFTC COT data, public news, and event context. Long-history CME futures curve data, longer news history, and calibration residuals still need work.
+The currently usable training data includes price panels, EIA weekly petroleum data, CFTC COT data, public news, and event context. Long-history CME futures curve data, vendor-grade news, and calibration residuals still need work.
 
 ## Implementation Scope
 
 | Area | Status |
 | --- | --- |
-| Backend | FastAPI app at `backend.app.main:app`; provides `/api/forecast`, `/api/chart`, and `/api/market-context` |
-| Frontend | Always shows `CL=F` forecast overlay, context markers, and news/context panel without a symbol search input |
+| Backend | FastAPI app at `backend.app.main:app`; provides `/api/forecast`, `/api/chart`, `/api/dashboard-analysis`, and `/api/backtests/visualization` |
+| Frontend | Always shows a `CL=F / 1D / 30-day` forecast overlay, context markers, AI chat, and commentary/news/report panels without a symbol search input |
 | Market data | yfinance-based `oil_core` plus auxiliary macro/related market panels can be built |
 | Fundamentals | EIA bulk and CFTC ZIP/manual CSV ingestion available |
 | CME | Manual CSV ingestion available; licensed CSV still needed |
-| News/context | Yahoo RSS/GDELT public news collection and local_rules/external LLM context generation |
-| Deep learning | Single user-facing `oil_context_fusion` training and metadata storage |
+| News/context | Yahoo RSS/Google News/public RSS/GDELT public news collection and local_rules/external LLM context generation |
+| Deep learning | Single user-facing `oil_context_fusion` training and metadata storage with event-shock expert and 27-dimensional event context |
 | Backtest/calibration | Rolling backtest and calibration scripts exist; sufficient coverage validation must still be run |
 | Docs | Korean/English mirror structure maintained |
 
@@ -47,8 +47,10 @@ The currently usable training data includes price panels, EIA weekly petroleum d
 | `GET /api/forecast` | new forecast contract |
 | `GET /api/chart` | legacy chart compatibility contract; do not remove |
 | `GET /api/market-context` | news, context points, and scenario commentary |
+| `GET /api/dashboard-analysis` | combined one-call LLM generation for commentary/news/report panels |
 | `GET /api/explanation` | forecast and optional LLM context explanation |
 | `GET /api/backtests` | backtest output lookup |
+| `GET /api/backtests/visualization` | chart overlay and realized future candles from a historical origin |
 
 New fields must be additive. `/api/chart` remains a backward-compatibility target.
 
@@ -67,7 +69,7 @@ The LLM converts news/events into a context vector and can indirectly affect con
 
 | Model | Class | Status |
 | --- | --- | --- |
-| `oil_context_fusion` | Unified deep `.pt` | Single user-facing operational model. Combines LSTM, TCN, attention, and context experts |
+| `oil_context_fusion` | Unified deep `.pt` | Single user-facing operational model. Combines LSTM, TCN, attention, context, pattern, motif, and event-shock experts |
 | `motif`, `pattern_mlp` | Internal benchmark | Not operational choices; used for fallback/backtest comparison |
 | `deep_lstm_tcn_fusion`, `llm_context_seq_moe` | Legacy merged | Their structures are merged into `oil_context_fusion` |
 | `random_walk`, `drift`, `seasonal_naive`, `volatility_scaled_naive` | Baseline | Used for backtest/fallback comparison |
@@ -86,8 +88,8 @@ Exact row counts and date ranges are tracked in `data/manifests/data_inventory.j
 | EIA weekly | `data/processed/oil_fundamentals/eia_weekly.csv` | Long-history petroleum weekly series |
 | CFTC COT | `data/processed/oil_fundamentals/cftc_cot_weekly.csv` | Weekly positioning series |
 | FRED macro | `data/processed/macro_panel/fred_daily_wide.csv` | Macro series such as rates, FX, dollar, and VIX |
-| News | `data/raw/news/public_market_news.csv` | Public news text |
-| Event context | `data/processed/event_context/event_context_daily.csv` | Daily LLM/local context vectors |
+| News | `data/raw/news/public_market_news.csv` | Public news text, currently about 148,408 rows |
+| Event context | `data/processed/event_context/event_context_daily.csv` | Daily LLM/local context vectors for 13 related symbols. 45,188 total rows, including 3,476 external-LLM CL=F rows |
 | Inventory | `data/manifests/data_inventory.json` | Data quality, date range, and row count records |
 
 Missing data: CME curve, longer news history, sufficient calibration residuals, and sub-daily release timestamps.
@@ -114,13 +116,13 @@ Success means `safety_check_passed=true` and no `External LLM fallback` warning.
 
 Yes, the current data can train models, with the following interpretation:
 
-- `horizon=30`: the operating artifact length. The UI's 7/14/30 choices display leading segments from the h30 path.
-- `horizon=7` and `horizon=14`: use the leading part of the h30 result rather than separate models, keeping the displayed paths consistent.
+- `horizon=30`: the operating artifact length. The dashboard renders the full path as the fixed 30-day forecast and marks the 1W/2W/1M endpoints with dots and labels.
+- `horizon=7` and `horizon=14`: preserved for API compatibility and experiments. The operating UI now uses endpoint markers on the h30 path instead of separate display choices.
 - Longer than 30 steps should use separately trained h60/h90 artifacts instead of recursively chaining h30 outputs.
 - Without CME curve data, term-structure edge is missing.
 - Without sufficient calibration residuals, bands must not be called validated confidence intervals.
 
-As of 2026-06-02, the `oil_context_fusion` 1D/1H h30 artifacts were retrained with the `oil_core` processed panel, EIA/CFTC/FRED macro data, and event context. The single artifact contains `lstm`, `tcn`, `attention`, `context`, `pattern`, and `motif` expert systems. 1D h30 uses 8,252 training / 1,768 validation / 1,768 test samples, validation RMSE 3.1088, and test RMSE 3.5934. 1H h30 uses 45,962 training / 9,849 validation / 9,849 test samples, validation RMSE 0.4963, and test RMSE 2.1368.
+As of 2026-06-05, the operating artifact is the CL=F-only `oil_context_fusion_1d_h30`. It uses the processed 1D market panel, EIA/CFTC/FRED macro data, external LLM CL=F event context, and 14 raw-news-pool aggregate features. The single artifact contains `lstm`, `tcn`, `attention`, `context`, `pattern`, `motif`, and `event_shock` experts. 1D h30 uses 1,651 training / 353 validation / 353 test samples, validation MAPE 5.45%, test MAPE 6.93%, and validation/test shape score 90.5/87.6. The metadata training cutoff is 2023-07-03 and sample end is 2026-04-23.
 
 Use the training section in `docs/en/OPERATIONS.md` as the source of truth for commands.
 
@@ -132,17 +134,20 @@ Use the training section in `docs/en/OPERATIONS.md` as the source of truth for c
 - Added public news ingestion and event context generation
 - Optimized deep dataset recent-origin sampling
 - Fixed `train_deep_fusion_models.py --use-processed-data`
-- Added `/api/market-context`
-- Added frontend context markers, news panel, and scenario commentary
+- Added `/api/market-context`, `/api/dashboard-analysis`, and `/api/backtests/visualization`
+- Added frontend context markers, news panel, AI market commentary, forecast report, and AI chat panel
+- Combined dashboard AI panels into one external LLM request and added stale-response protection for language switches and backtest-origin changes
+- Added fixed 30-day forecast view, 1W/2W/1M endpoint markers, live/backtest chart mode, and realized future candle overlay
+- Added neutral glass overlays and typing animation to the chat panel
+- Removed duplicate news, internal placeholders, and blank `-` explanations from news markers and news interpretation panels
 - Documented Google OpenAI-compatible LLM context setup
 - Removed stale report Markdown and updated canonical docs
 
 ## Next Priorities
 
-1. Verify Google LLM live call with `.env` or shell exports
-2. Regenerate LLM context with live calls
-3. Run rolling backtests and calibration for `oil_context_fusion` 1D/1H h30
-4. Acquire and ingest CME settlement/curve CSV
-5. Run rolling backtest and quantile calibration
-6. Load longer news history
-7. Exercise `/api/market-context` in the dashboard and check UX/performance
+1. Run rolling backtests and quantile calibration for `oil_context_fusion_1d_h30`
+2. Expose external LLM usage/error state in operational monitoring
+3. Acquire and ingest CME settlement/curve CSV
+4. Add vendor-grade/licensed news exports through `data/external`
+5. Validate the 1H h30 artifact separately before deciding whether to expand the UI
+6. Consider splitting live chart state and backtest visualization state into separate chart states

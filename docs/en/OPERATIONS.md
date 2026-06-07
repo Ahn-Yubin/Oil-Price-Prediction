@@ -117,7 +117,7 @@ Manifest:
 
 ## Training
 
-One-day h30 training for the single oil model with current processed data. The operating UI's 7/14/30 choices display leading segments from this h30 path.
+One-day h30 training for the single oil model with current processed data. The operating UI renders this full h30 path as the fixed 30-day forecast and marks the 1W/2W/1M endpoints with dots and labels.
 
 ```bash
 .venv/bin/python scripts/train/train_deep_fusion_models.py \
@@ -200,11 +200,13 @@ Until calibration artifacts are sufficiently validated, forecast bands are resid
 - `/api/forecast`: new forecast contract
 - `/api/chart`: legacy chart compatibility contract
 - `/api/market-context`: news, context markers, and model scenario commentary
+- `/api/dashboard-analysis`: combined LLM response for commentary/news/report panels
 
 Example:
 
 ```bash
 curl "http://127.0.0.1:8000/api/market-context?symbol=CL=F&interval=1d&models=oil_context_fusion"
+curl "http://127.0.0.1:8000/api/dashboard-analysis?symbol=CL=F&interval=1d&models=oil_context_fusion&horizon=30&language=en"
 ```
 
 ## Validation

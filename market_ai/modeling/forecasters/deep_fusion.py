@@ -147,17 +147,26 @@ def forecast_with_deep_model(
         )
     except Exception as exc:
         raise DeepModelUnavailable(str(exc)) from exc
-    p50 = np.asarray(prediction["quantile_prices"]["p50"], dtype=np.float64)
+    quantile_prices = {key: np.asarray(value, dtype=np.float64) for key, value in prediction["quantile_prices"].items()}
+    p50 = np.asarray(quantile_prices["p50"], dtype=np.float64)
+    prob_up = np.asarray(prediction["prob_up"], dtype=np.float64)
+    confidence = np.asarray(prediction["confidence"], dtype=np.float64)
+    # Keep the displayed point path as the model's learned p50 path.  Shape now
+    # belongs in training/evaluation, not in inference-time path decoration.
+    point_values = p50
+    point_path_kind = "p50_shape_trained"
     return {
         "id": model_name,
         "label": DEEP_LABELS.get(model_name, model_name),
         "description": "Artifact-based volatility-scaled cumulative log-return deep model",
         "color": DEEP_COLORS.get(model_name, "#8b949e"),
-        "values": p50,
-        "quantile_prices": {key: np.asarray(value, dtype=np.float64) for key, value in prediction["quantile_prices"].items()},
-        "prob_up": np.asarray(prediction["prob_up"], dtype=np.float64),
+        "values": point_values,
+        "median_values": p50,
+        "point_path_kind": point_path_kind,
+        "quantile_prices": quantile_prices,
+        "prob_up": prob_up,
         "expected_volatility": np.asarray(prediction["expected_volatility"], dtype=np.float64),
-        "confidence": np.asarray(prediction["confidence"], dtype=np.float64),
+        "confidence": confidence,
         "metadata": prediction["metadata"],
         "artifact_file": artifact_path.name,
         "event_context_source": "live_or_override" if event_context_frame is not None else "processed_or_file",

@@ -39,9 +39,17 @@ def test_oil_context_fusion_artifact_load_accepts_expert_names(tmp_path: Path):
     loaded, loaded_meta = load_deep_artifact(artifact)
     out = loaded(torch.randn(1, 16, 5), torch.randn(1, 16, 2), torch.zeros(1, 13), torch.zeros(1, 4))
     assert out["quantiles"].shape == (1, 3, 7)
-    assert out["expert_weights"].shape == (1, 6)
-    assert out["expert_names"] == ("lstm", "tcn", "attention", "context", "pattern", "motif")
-    assert loaded_meta["deep_config"]["expert_names"] == ["lstm", "tcn", "attention", "context", "pattern", "motif"]
+    assert out["expert_weights"].shape == (1, 7)
+    assert out["expert_names"] == ("lstm", "tcn", "attention", "context", "pattern", "motif", "event_shock")
+    assert loaded_meta["deep_config"]["expert_names"] == [
+        "lstm",
+        "tcn",
+        "attention",
+        "context",
+        "pattern",
+        "motif",
+        "event_shock",
+    ]
 
 
 def test_deep_metadata_writes_operational_fields(tmp_path: Path):

@@ -117,7 +117,7 @@ Manifest:
 
 ## 학습
 
-현재 보유한 processed data를 사용한 단일 유가 모델 1일봉 h30 학습 예시입니다. 운영 화면의 7/14/30 선택지는 이 h30 경로의 앞부분을 잘라 표시합니다.
+현재 보유한 processed data를 사용한 단일 유가 모델 1일봉 h30 학습 예시입니다. 운영 화면은 이 h30 경로 전체를 고정 30일 예측으로 표시하고, 1주/2주/한달 endpoint를 점과 텍스트로 표시합니다.
 
 ```bash
 .venv/bin/python scripts/train/train_deep_fusion_models.py \
@@ -200,11 +200,13 @@ Calibration artifact가 충분히 검증되기 전까지 forecast band는 residu
 - `/api/forecast`: 신규 forecast contract
 - `/api/chart`: 기존 chart compatibility contract
 - `/api/market-context`: 뉴스, context marker, 모델 시나리오 해설
+- `/api/dashboard-analysis`: 시황/뉴스/리포트 패널 통합 LLM 응답
 
 예시:
 
 ```bash
 curl "http://127.0.0.1:8000/api/market-context?symbol=CL=F&interval=1d&models=oil_context_fusion"
+curl "http://127.0.0.1:8000/api/dashboard-analysis?symbol=CL=F&interval=1d&models=oil_context_fusion&horizon=30&language=ko"
 ```
 
 ## 검증

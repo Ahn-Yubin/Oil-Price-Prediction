@@ -63,6 +63,8 @@ def write_deep_metadata(
         "artifact_file": artifact_path.name,
         "interval": metadata.get("interval"),
         "created_at": metadata.get("created_at") or datetime.now(timezone.utc).isoformat(),
+        "sample_start": metadata.get("sample_start"),
+        "sample_end": metadata.get("sample_end"),
         "train_start": metadata.get("train_start"),
         "train_end": metadata.get("train_end"),
         "training_cutoff": metadata.get("training_cutoff"),

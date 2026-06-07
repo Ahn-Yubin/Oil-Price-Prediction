@@ -10,9 +10,10 @@
 2. 선택한 `origin_time` 이하의 마지막 candle을 기준점으로 선택합니다.
 3. 모델 입력에는 `origin_time`까지의 candle만 전달합니다.
 4. 예측 경로는 기준점 이후 `horizon` 길이만큼 생성합니다.
-5. origin이 artifact cutoff 이후이고, 이미 결과가 확정된 prior origin이 최소 8개 있으면 온라인 잔차 보정을 적용합니다. 이 보정은 과거 확정 예측 오차만 사용하며 현재 origin 이후 실제값은 사용하지 않습니다.
-6. 기준점 이후 실제 candle은 `actual_future_candles`로 별도 반환되어 차트에 반투명 candle로 표시됩니다.
-7. MAE, RMSE, MAPE는 예측 가격과 이후 실제 종가를 같은 step끼리 비교해 계산합니다.
+5. 1D `oil_context_fusion` 경로는 origin 시점의 가격 상태와 event/context 벡터만 사용하는 path adapter를 통과합니다. Adapter 종류는 `deep_model_info.oil_context_fusion.path_adapter`에 기록됩니다.
+6. 기본값에서는 온라인 잔차 보정을 적용하지 않습니다. `ENABLE_ONLINE_RESIDUAL_CALIBRATION=true`로 명시적으로 켠 경우에만, origin 이전에 이미 결과가 확정된 prior forecast residual로 보정합니다.
+7. 기준점 이후 실제 candle은 `actual_future_candles`로 별도 반환되어 차트에 반투명 candle로 표시됩니다.
+8. MAE, RMSE, MAPE는 예측 가격과 이후 실제 종가를 같은 step끼리 비교해 계산합니다.
 
 이 화면은 “한 시점의 point-in-time 시각화”입니다. 모델 전체 성능을 판단하려면 아래의 전진분석 리더보드를 봐야 합니다.
 
@@ -62,9 +63,9 @@ Batch leaderboard:
 - event context도 origin 이전 lookback window만 집계합니다.
 - 미래 candle은 예측 입력이 아니라 `actual_future_candles`와 metric 계산에만 사용합니다.
 - random split은 사용하지 않습니다. 학습 데이터셋은 chronological train/validation/test split을 사용합니다.
-- 온라인 잔차 보정은 `post_artifact_cutoff` origin에서만 켜지고, `origin - horizon` 이전에 이미 실제값이 확정된 prior forecast residual만 사용합니다. prior residual이 8개 미만이면 보정하지 않습니다.
+- 온라인 잔차 보정은 기본 비활성화입니다. 켜는 경우에도 `post_artifact_cutoff` origin에서만 동작하고, `origin - horizon` 이전에 이미 실제값이 확정된 prior forecast residual만 사용합니다. prior residual이 8개 미만이면 보정하지 않습니다.
 
-주의할 점도 있습니다. 현재 deep artifact metadata의 `train_end`와 `training_cutoff`는 이름과 달리 전체 sample 범위의 끝으로 기록됩니다. 실제 학습/검증/테스트는 `n_train`, `n_val`, `n_test`에 따라 시간순으로 나뉩니다. 따라서 백테스트 결과에는 `origin_time`, `actual_window_end`, `artifact_training_cutoff`, `leakage_audit_status`를 함께 기록해 origin이 artifact sample 범위와 겹치는지 확인합니다.
+Deep artifact metadata는 전체 sample 범위(`sample_start`, `sample_end`)와 실제 학습 cutoff(`train_end`, `training_cutoff`)를 분리해 기록합니다. 백테스트 결과에는 `origin_time`, `actual_window_end`, `artifact_training_cutoff`, `leakage_audit_status`를 함께 기록해 origin이 artifact 학습 범위와 어떻게 관계되는지 확인합니다.
 
 `leakage_audit_status` 의미:
 
@@ -78,10 +79,16 @@ Batch leaderboard:
 
 - `mae`: 평균 절대 가격 오차
 - `rmse`: 큰 오차에 더 민감한 가격 오차
+- `mape`: 예측 경로 전체의 step별 절대 퍼센트 오차 평균. 끝점 하나만 비교하지 않습니다.
 - `smape`: 가격 크기를 고려한 대칭 퍼센트 오차
 - `mase`: naive 변화폭 대비 상대 오차
 - `median_absolute_error`: 중앙 절대 오차
 - `directional_accuracy`: 경로 방향 일치율
+- `final_ape_pct`: 마지막 step의 절대 퍼센트 오차
+- `step_directional_accuracy`: 각 step 수익률 방향 일치율
+- `pred_turns`, `actual_turns`, `turn_error`: 예측/실제 경로의 고점·저점 전환 횟수와 차이
+- `range_ratio`: 실제 경로 range 대비 예측 경로 range
+- `shape_score`: 방향, 전환 횟수, range ratio를 합친 경로 형태 점수
 - `pinball_loss`: 분위수 예측 품질
 - `coverage_80`, `coverage_90`: 실제값이 P10-P90, P05-P95 band 안에 들어간 비율
 - `winkler_80`: band 폭과 이탈 패널티를 같이 보는 점수
@@ -111,23 +118,36 @@ Batch leaderboard는 `outputs/backtests/leaderboards/{timestamp}` 아래에 같�
 
 ## 현재 해석 기준
 
-`oil_context_fusion_1d_h30` artifact는 2026-03-26까지의 sample 범위를 가진 현재 metadata를 사용합니다. 로컬 processed 1D panel은 2026-05-08까지 있으므로 30일 horizon에서 사용할 수 있는 가장 최근 origin도 2026-03-26 근처입니다. 즉 현재 30일 horizon 백테스트는 “rolling mechanics와 상대 성능 점검”에는 유용하지만, artifact cutoff 이후 충분한 기간을 가진 완전한 out-of-sample 검증이라고 보기는 어렵습니다.
+2026-06-05 재작업 후 현재 기준 1D artifact는 `oil_context_fusion_1d_h30`입니다. Dashboard는 30일 경로를 고정 표시하고, 1주/2주/한달은 같은 h30 출력 위의 endpoint marker로 표시합니다. 이 artifact는 외부 LLM으로 인코딩한 CL=F 이벤트 컨텍스트를 사용하며, 과최적화 확인을 위해 final-fit이 아니라 chronological holdout split으로 저장했습니다.
 
-2026-06-04에 로컬 processed panel로 재실행한 주요 지표는 다음과 같습니다.
+중요한 구분:
 
-| 구간 | 모델 | Origins | MAE | RMSE | MAPE | sMAPE | 해석 |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| 7일 | oil_context_fusion | 12 | 6.11 | 6.97 | 6.67% | 6.71% | 7개 origin은 artifact sample 범위와 겹치고 5개 origin만 cutoff 이후입니다. |
-| 7일 cutoff 이후만 | oil_context_fusion | 5 | 7.59 | 8.46 | 7.77% | 7.46% | 현재 데이터만으로는 5% MAPE에 도달하지 못했습니다. |
-| 30일 | oil_context_fusion | 8 | 11.05 | 13.57 | 12.21% | 13.65% | 모든 origin이 artifact sample 범위와 겹칩니다. |
+- 현재 저장 artifact의 metadata는 `sample_start`, `sample_end`, `train_end`, `training_cutoff`를 분리해 기록합니다.
+- 백테스트 화면의 MAPE는 예측 경로 전체의 step별 오차 평균입니다. 끝점 하나만 비교하지 않습니다.
+- 온라인 잔차 보정은 기본 비활성화입니다. 이 보정은 2026-02 급등 origin 하나에는 도움이 됐지만 다른 origin을 악화시켜 모델 평가를 흐릴 수 있어 기본값으로 쓰지 않습니다.
 
-최신 yfinance 데이터를 별도로 확인하면 2026-06-04까지 CL=F 1D 데이터가 존재하지만, 2026년 5월 후반 급등 구간에서 현재 artifact는 7일 MAPE가 5%를 안정적으로 달성하지 못했습니다. 온라인 잔차 보정은 일부 큰 오차 origin을 낮출 수 있지만, 이미 6~7%대인 origin을 악화시키는 경우도 있어 최소 8개 prior residual이 있을 때만 제한적으로 적용합니다. 따라서 현재 상태에서 “MAPE 5% 달성”이라고 보고하면 과최적화 또는 미래정보 누수에 가까운 해석이 됩니다.
+2026-06-05 metadata와 로컬 processed panel/LLM event context로 확인한 주요 지표는 다음과 같습니다.
+
+| 구간 | Origins | MAPE | Range ratio | Shape score | 해석 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Validation holdout | 353 | 5.45% | 1.32 | 90.5 | 시간순 holdout의 평균 성능입니다. RMSE는 5.42입니다. |
+| Test holdout | 353 | 6.93% | 1.26 | 87.6 | 학습 이후 구간의 평균 성능입니다. RMSE는 8.02입니다. |
+| 2025-08-14, 30일 표시 | 1 | 2.26% | 2.01 | 73.8 | 박스권/하락 구간은 p50 경로가 실제 경로를 비교적 잘 따라갑니다. |
+| 2025-11-04, 30일 표시 | 1 | 3.58% | 0.89 | 91.1 | 경로 range와 전환 형태가 비교적 잘 맞은 예입니다. |
+| 2026-02-17, 30일 표시 | 1 | 23.99% | 0.14 | 37.0 | origin 이후 미래 이벤트성 급등이 발생한 문제 구간입니다. |
+| 2026-02-18, 30일 표시 | 1 | 21.77% | 0.15 | 36.8 | p50 중앙경로가 실제 이벤트 점프를 따라가지 못한 문제 구간입니다. |
+
+이번 수정은 표시 경로를 꾸미는 방식이 아니라 모델 학습과 평가 구조를 바꾸는 방식입니다. `oil_context_fusion`에 event-shock expert와 shock/range 보조 head를 추가했고, 손실 함수는 p50의 step return, detrended shape, 경로 range, step volatility, curvature, step 방향성을 함께 최적화합니다. 화면의 대표선은 inference-time 후처리 없이 모델이 학습한 p50입니다.
+
+2026-02-17/18 origin은 별도로 해석해야 합니다. 그 시점까지의 가격은 60달러대였고, 실제 가격은 이후 30일 안에 90달러대로 뛰었습니다. 이 급등은 origin 이후에 전개된 이벤트 결과이므로, 미래 뉴스나 미래 가격을 입력하지 않는 p50 중앙경로가 해당 realized path를 5% MAPE로 맞히는 것은 정직한 point-in-time 예측으로는 어렵습니다.
+
+이 구간을 억지로 5%처럼 만들 수 있는 방법은 두 가지입니다. 하나는 미래 가격/뉴스를 섞는 leakage이고, 다른 하나는 특정 origin에 맞춘 후처리입니다. 둘 다 과최적화 위험이 크므로 기본 모델과 백테스트에는 넣지 않습니다. 대신 이 문제는 중앙 p50 예측이 아니라 “이벤트 점프 확률과 scenario band”로 별도 표현하는 것이 원론적으로 맞습니다.
 
 더 엄밀한 검증을 하려면 다음 중 하나가 필요합니다.
 
-1. 더 최신 실제 가격 데이터를 추가해 cutoff 이후 origin을 충분히 확보합니다.
-2. artifact를 더 과거 cutoff로 고정하고 그 이후 기간만 walk-forward로 평가합니다.
-3. rolling retrain 또는 expanding retrain을 도입해 각 origin 이전 데이터로만 새 artifact를 학습합니다.
+1. artifact를 특정 과거 cutoff로 고정하고 그 이후 기간만 평가합니다.
+2. rolling retrain 또는 expanding retrain을 도입해 각 origin 이전 데이터로만 새 artifact를 학습합니다.
+3. 최종 배포 artifact 성능과 walk-forward out-of-sample 성능을 별도 표로 계속 관리합니다.
 
 ## Calibration
 

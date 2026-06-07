@@ -39,7 +39,7 @@ provider raw data
 
 ## LLM Flow
 
-The LLM is used only as a context encoder inside `market_ai.llm`.
+The LLM is used as a context encoder inside `market_ai.llm` and as a prose generator in the backend dashboard analysis route over already-computed forecast/news evidence.
 
 ```text
 news/events
@@ -55,6 +55,8 @@ The LLM does not generate numeric forecast paths.
 - `/api/forecast`: new typed forecast contract
 - `/api/chart`: legacy chart compatibility contract
 - `/api/market-context`: news/context markers and scenario commentary
+- `/api/dashboard-analysis`: one external LLM call for AI commentary, news interpretation, and forecast report prose
+- `/api/backtests/visualization`: forecast overlay and realized future candles from a historical origin
 - `/api/explanation`: forecast explanation
 - `/api/models`, `/api/data-status`, `/api/backtests`: operational/diagnostic endpoints
 

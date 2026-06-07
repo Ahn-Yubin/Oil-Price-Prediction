@@ -8,17 +8,18 @@ The intended flow is:
 
 ```text
 news/event text
--> LLM or local_rules encoder
+-> LLM context encoder
 -> bias, impact, uncertainty, event count, explanation, event embedding
+-> raw recent-news-pool volume, directional pressure, sector pressure, and source-diversity features
 -> data/processed/event_context/event_context_daily.csv
 -> x_event_context input for oil_context_fusion
 -> time-series model predicts volatility-scaled cumulative log return distribution
 -> prices are reconstructed with current_price * exp(predicted_cumulative_log_return_h)
 ```
 
-So the user-facing summary is correct: news is read by the LLM, converted into scores/context, and used as one model input. Those scores are point-in-time context features, not investment advice or numeric price targets.
+So the user-facing summary is correct: news is read by the LLM, converted into scores/context, and used as one model input. Those scores are point-in-time context features, not investment advice or numeric price targets. Local rules are only for selecting date/symbol/topic candidates from the large news pool, computing raw-news-pool aggregates, and development diagnostics. If an external LLM call fails during a training-context build, the row is not silently filled with a local estimate; the failed date must be retried through the LLM before it is merged.
 
-Training samples do not use only the origin date. With the current `lookback=128` setup, each origin aggregates event context from the prior 128-day window into `x_event_context [13]`. Event-count fields are summed, while directional/impact/quality fields are impact-score weighted averages.
+Training samples do not use only the origin date. With the current `lookback=128` setup, each origin aggregates event context from the prior 128-day window into `x_event_context [27]`. The first 13 features are LLM or deterministic-encoder bias/impact/uncertainty/event-embedding values. The added 14 features come from the full raw point-in-time news pool, including news volume, selection coverage, bullish/bearish pressure, energy/geopolitical/macro/supply/demand pressure, and source diversity. Event-count fields are summed, while directional/impact/quality fields are weighted by impact score and recency decay. This prevents current geopolitical or supply shocks from being diluted by older news and prevents the bounded LLM input count from becoming a model-input bottleneck.
 
 ## Live Dashboard Pipeline
 
@@ -40,16 +41,20 @@ When the dashboard opens a symbol or the interval/horizon changes, it runs the f
    This function fetches recent public news from Google News RSS and Yahoo Finance RSS, then applies symbol-aware query and relevance filtering. Current live dashboard context requests ask for up to 60 rows, while chat asks for up to 24 rows.
 
 6. The news DataFrame is converted into `RawNewsItem` objects and passed to the encoder.
-   If external LLM calls are enabled and the rate guard allows the call, the LLM encoder is used. Otherwise `local_rules` produces the same schema deterministically. The output schema is `overall_bias`, `impact_score`, `uncertainty`, `event_count`, `explanation`, and `event_embedding[13]`.
+   If external LLM calls are enabled and the rate guard allows the call, the LLM encoder is used. Otherwise `local_rules` produces the same schema deterministically. The LLM output schema is `overall_bias`, `impact_score`, `uncertainty`, `event_count`, `explanation`, and `event_embedding[13]`. The builder then appends 14 aggregate features from the recent raw-news pool, so the model input is 27-dimensional.
+   `local_rules` and raw-news aggregates promote war, attacks, sanctions, and Hormuz/Red Sea terms into geopolitical supply-shock context. This prevents mixed headlines such as “prices dip, but a US-Iran war raises supply disruption risk” from being diluted into a flat neutral signal.
 
 7. The encoder output becomes a one-row `context_frame` for deep-model inference.
    `oil_context_fusion` uses this `x_event_context` for context expert gating, uncertainty, and confidence. The LLM does not draw the forecast line directly; the news context vector becomes an input feature and the time-series model computes the forecast path.
 
 8. `/api/market-context?live=1` returns the same live context payload to the UI.
-   Chart news markers, popovers, and the right-side “News & Scenario Context” panel use the same `news` and `context_points`. Each visible news row shows the current context point’s input factors: bias, impact, uncertainty, and event count.
+   Chart news markers, popovers, and the “News Interpretation” panel use the same `news`, `context_points`, and `chart_context_points`. Display context deduplicates headline/source/date rows and does not show internal placeholders or blank `-` explanations.
 
-9. `/api/model-commentary` and `/api/assistant-chat` explain already-computed model paths and news context.
-   They do not create new numeric price forecasts. To avoid rate-limit spikes, the server enforces an external LLM call guard over a 60-second window and uses commentary/context caches. If the guard blocks a call, deterministic explanation is returned with a warning.
+9. `/api/dashboard-analysis` explains already-computed model paths and news context with one external LLM call.
+   This endpoint asks for AI market commentary, news interpretation, and forecast report prose in one JSON response, then renders the pieces in separate panels. Standalone `/api/model-commentary`, `/api/market-context`, and `/api/report` remain compatibility/diagnostic routes, but the operating dashboard prefers the combined endpoint to reduce external LLM calls. The server enforces a 60-second external-call guard and uses a dashboard-analysis cache. If the model appends extra text after the JSON object, the parser recovers by reading the first JSON object.
+
+10. `/api/assistant-chat` answers short user-entered questions.
+    It also does not create new numeric price forecasts. The UI shows a growing-dot assistant bubble while a chat answer is pending and blocks duplicate submits.
 
 ## Allowed Roles
 
@@ -58,6 +63,7 @@ When the dashboard opens a symbol or the interval/horizon changes, it runs the f
 - Show historical news and the context interpretation on the dashboard.
 - Affect gating, confidence, and uncertainty indirectly inside `oil_context_fusion`.
 - Provide historical context markers and scenario commentary through `/api/market-context`.
+- Write commentary/news/report prose from already-computed forecasts and supplied news evidence through `/api/dashboard-analysis`.
 
 ## Forbidden Roles
 
@@ -65,16 +71,19 @@ When the dashboard opens a symbol or the interval/horizon changes, it runs the f
 - LLM output must not overwrite numeric forecasts from deep models or baselines.
 - Trading instructions or fixed target prices from the LLM must be ignored by validation.
 - Forecast bands must not be called validated confidence intervals until coverage has actually been measured.
+- Backtest-origin explanations must not use live relative wording such as current, recent, now, or today. When `origin_time` is present, the first sentence includes the absolute reference date/time.
 
 ## Implementations
 
-- `LocalEventContextEncoder`: reads CSV/JSON event files with deterministic rules.
+- `LocalEventContextEncoder`: reads CSV/JSON event files with deterministic rules. Use it for development, diagnostics, or truly empty-context days where there is no news to send to the LLM.
 - `OpenAICompatibleLLMEventEncoder`: calls an OpenAI-compatible chat completions endpoint.
 - `LocalHTTPLLMEventEncoder`: calls an Ollama/vLLM-compatible local HTTP endpoint.
 - `OfflineFileLLMEventEncoder`: reads a precomputed JSON/JSONL context cache.
 - `NullLLMEventEncoder`: disables LLM context completely.
 
-External calls require both `--live` and `ENABLE_EXTERNAL_LLM_CALLS=true`. Missing keys or call failures fall back to local encoders and leave the reason in warnings.
+External calls require both `--live` and `ENABLE_EXTERNAL_LLM_CALLS=true`. Training builds that use an external LLM run in strict mode by default. If the API key is missing or a call fails, the build stops instead of writing a `local_rules` row into the training CSV. Use `--allow-external-llm-fallback` only when deliberately testing fallback behavior during development.
+
+The dashboard runtime combined LLM call also returns an explicit unavailable state when external LLM configuration is missing. The frontend marks previous dashboard-analysis responses stale on language switches, live/backtest changes, and backtest-origin changes, then clears panel/marker state before rendering the next response so old news cannot remain on a new chart.
 
 ## Google Gemma/Gemini Setup
 
@@ -157,15 +166,26 @@ Convert the current news file into LLM context:
 ```bash
 .venv/bin/python scripts/data/build_event_context.py \
   --news-path data/raw/news/public_market_news.csv \
-  --symbols CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F,DX-Y.NYB,EURUSD=X,USDKRW=X,JPY=X,SPY,QQQ,^GSPC,^VIX,XLE,USO \
+  --symbols CL=F \
   --mode google_generative \
-  --live
+  --live \
+  --start 2016-11-01 \
+  --end 2026-05-08 \
+  --news-limit-per-context 8 \
+  --llm-batch-size 1 \
+  --llm-min-interval-seconds 5.0
 ```
+
+`--news-limit-per-context` is the bounded number of news rows the LLM reads directly. The current historical cache was generated with the latest 8 news items from the prior 7 days for each date. This limit controls token cost and request size; to avoid a model-input bottleneck, the builder separately computes 14 aggregate features from the full raw point-in-time news pool over recent 1/3/7/30-day windows.
+
+With an external LLM mode and `--live`, fallback rows are rejected immediately. If the cause is quota or rate limit, keep the cache, reset usage or increase the request interval, and retry only the failed dates. This prevents lower-quality non-LLM context from leaking into model training.
 
 Outputs:
 
 - `data/processed/event_context/event_context_daily.csv`
 - `data/processed/event_context/llm_context_cache.jsonl`
+
+The 2026-06-05 cleanup produced 3,476 CL=F event-context rows, a 27-dimensional event/context input, and zero external LLM fallback rows. If Google free-tier 429s occur, keep the cache and retry only the failed dates with `--llm-batch-size 1` and a sufficient `--llm-min-interval-seconds`.
 
 ## Training
 
@@ -193,5 +213,7 @@ Outputs:
   --device mps \
   --force
 ```
+
+For the deployable final artifact, first record holdout performance separately, then add `--fit-final-all-data`.
 
 The dashboard server must be started from a shell with the same environment variables. If the server is already running, restart it after changing LLM environment variables.

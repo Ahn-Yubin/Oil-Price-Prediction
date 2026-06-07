@@ -1,164 +1,7 @@
 {
-  "generated_at": "2026-06-04T11:41:28.010581+00:00",
+  "generated_at": "2026-06-05T13:03:17.048853+00:00",
   "schema": "market_ai.data_inventory.v1",
   "datasets": [
-    {
-      "dataset_name": "interim_combined_market_events",
-      "source": "events",
-      "path": "/private/tmp/oil_event_context_probe/interim/events/combined_market_events.csv",
-      "symbol_or_series": "NG=F,RB=F,HO=F,CL=F,BZ=F,JPY=X,USDKRW=X,DX-Y.NYB",
-      "frequency": null,
-      "start": "2016-11-01T07:00:00+00:00",
-      "end": "2026-06-04T10:49:32+00:00",
-      "rows": 148050,
-      "columns": [
-        "timestamp",
-        "symbol",
-        "event_type",
-        "directional_bias",
-        "impact_strength",
-        "uncertainty",
-        "source_quality_score",
-        "summary",
-        "source"
-      ],
-      "generated_at": "2026-06-04T11:18:49.616427+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": true,
-      "notes": null
-    },
-    {
-      "dataset_name": "processed_event_context_daily",
-      "source": "events",
-      "path": "/private/tmp/oil_event_context_probe/processed/event_context/event_context_daily.csv",
-      "symbol_or_series": "CL=F",
-      "frequency": "daily",
-      "start": "2026-02-21T00:00:00+00:00",
-      "end": "2026-02-23T00:00:00+00:00",
-      "rows": 3,
-      "columns": [
-        "timestamp",
-        "symbol",
-        "feature_available_at",
-        "llm_mode",
-        "overall_bias",
-        "impact_score",
-        "uncertainty",
-        "event_count",
-        "llm_input_news_count",
-        "explanation",
-        "warnings",
-        "directional_bias_score",
-        "impact_strength",
-        "time_decay",
-        "event_count_1d",
-        "event_count_3d",
-        "event_count_7d",
-        "bullish_event_score",
-        "bearish_event_score",
-        "macro_event_score",
-        "energy_event_score",
-        "geopolitical_event_score",
-        "source_quality_score"
-      ],
-      "generated_at": "2026-06-04T11:18:49.622870+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": true,
-      "notes": "llm_mode=google_generative; live=True"
-    },
-    {
-      "dataset_name": "raw_news_public_market_news",
-      "source": "news",
-      "path": "/tmp/oil_news_feb_mar.csv",
-      "symbol_or_series": "ALL",
-      "frequency": null,
-      "start": "2026-02-16T05:45:00+00:00",
-      "end": "2026-03-03T01:00:00+00:00",
-      "rows": 200,
-      "columns": [
-        "published_at",
-        "symbol",
-        "headline",
-        "body",
-        "source",
-        "url",
-        "retrieved_at"
-      ],
-      "generated_at": "2026-06-04T10:48:42.845347+00:00",
-      "source_url_or_provider": "yahoo_finance_rss,gdelt_doc_api",
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_events_public_news_fetch_status",
-      "source": "events",
-      "path": "/tmp/oil_news_feb_mar_status.csv",
-      "symbol_or_series": null,
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 20,
-      "columns": [
-        "provider",
-        "topic_or_symbol",
-        "window_start",
-        "window_end",
-        "status",
-        "rows",
-        "error"
-      ],
-      "generated_at": "2026-06-04T10:48:42.846081+00:00",
-      "source_url_or_provider": "yahoo_finance_rss,gdelt_doc_api",
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "raw_news_public_market_news",
-      "source": "news",
-      "path": "/tmp/oil_news_google_backfill_probe.csv",
-      "symbol_or_series": "BZ=F,RB=F,HO=F,CL=F,NG=F,ALL",
-      "frequency": null,
-      "start": "2026-02-10T08:00:00+00:00",
-      "end": "2026-06-04T10:49:32+00:00",
-      "rows": 7995,
-      "columns": [
-        "published_at",
-        "symbol",
-        "headline",
-        "body",
-        "source",
-        "url",
-        "retrieved_at"
-      ],
-      "generated_at": "2026-06-04T10:55:12.035068+00:00",
-      "source_url_or_provider": "yahoo_finance_rss,gdelt_doc_api",
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_events_public_news_fetch_status",
-      "source": "events",
-      "path": "/tmp/oil_news_google_backfill_probe_status.csv",
-      "symbol_or_series": null,
-      "frequency": null,
-      "start": null,
-      "end": null,
-      "rows": 31,
-      "columns": [
-        "provider",
-        "topic_or_symbol",
-        "query",
-        "window_start",
-        "window_end",
-        "status",
-        "rows",
-        "error"
-      ],
-      "generated_at": "2026-06-04T10:55:12.036430+00:00",
-      "source_url_or_provider": "yahoo_finance_rss,gdelt_doc_api",
-      "point_in_time_safe": false,
-      "notes": null
-    },
     {
       "dataset_name": "external_events_sample_market_events",
       "source": "external",
@@ -179,38 +22,13 @@
         "summary",
         "source"
       ],
-      "generated_at": "2026-05-11T06:39:19.368399+00:00",
+      "generated_at": "2026-06-05T07:08:26.479356+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
     },
     {
       "dataset_name": "interim_events_combined_market_events",
-      "source": "events",
-      "path": "data/interim/events/combined_market_events.csv",
-      "symbol_or_series": "HO=F,EURUSD=X,BZ=F,^VIX,JPY=X,RB=F,USO,XLE",
-      "frequency": "intraday",
-      "start": "2026-03-13T10:40:36+00:00",
-      "end": "2026-05-10T03:16:50+00:00",
-      "rows": 340,
-      "columns": [
-        "timestamp",
-        "symbol",
-        "event_type",
-        "directional_bias",
-        "impact_strength",
-        "uncertainty",
-        "source_quality_score",
-        "summary",
-        "source"
-      ],
-      "generated_at": "2026-05-11T06:39:19.374408+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": false,
-      "notes": null
-    },
-    {
-      "dataset_name": "interim_combined_market_events",
       "source": "events",
       "path": "data/interim/events/combined_market_events.csv",
       "symbol_or_series": "NG=F,RB=F,HO=F,CL=F,BZ=F,JPY=X,USDKRW=X,DX-Y.NYB",
@@ -229,9 +47,9 @@
         "summary",
         "source"
       ],
-      "generated_at": "2026-06-04T11:41:27.979305+00:00",
+      "generated_at": "2026-06-05T07:08:26.753393+00:00",
       "source_url_or_provider": null,
-      "point_in_time_safe": true,
+      "point_in_time_safe": false,
       "notes": null
     },
     {
@@ -242,18 +60,15 @@
       "frequency": null,
       "start": null,
       "end": null,
-      "rows": 703,
+      "rows": 23,
       "columns": [
         "provider",
         "topic_or_symbol",
         "status",
         "rows",
-        "error",
-        "query",
-        "window_start",
-        "window_end"
+        "error"
       ],
-      "generated_at": "2026-06-04T11:11:02.382419+00:00",
+      "generated_at": "2026-06-05T13:03:17.048043+00:00",
       "source_url_or_provider": "yahoo_finance_rss,gdelt_doc_api",
       "point_in_time_safe": false,
       "notes": null
@@ -273,7 +88,7 @@
         "rows",
         "error"
       ],
-      "generated_at": "2026-05-11T06:39:19.376076+00:00",
+      "generated_at": "2026-06-05T07:08:26.760608+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -297,7 +112,7 @@
         "path",
         "error"
       ],
-      "generated_at": "2026-05-11T06:39:19.377335+00:00",
+      "generated_at": "2026-06-05T07:08:26.761669+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -316,7 +131,7 @@
         "interval",
         "missing_timestamp"
       ],
-      "generated_at": "2026-05-11T06:39:19.380678+00:00",
+      "generated_at": "2026-06-05T07:08:26.764764+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -335,7 +150,7 @@
         "interval",
         "missing_timestamp"
       ],
-      "generated_at": "2026-05-11T06:39:19.407092+00:00",
+      "generated_at": "2026-06-05T07:08:26.789683+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -354,9 +169,28 @@
         "interval",
         "missing_timestamp"
       ],
-      "generated_at": "2026-05-11T06:39:19.416334+00:00",
+      "generated_at": "2026-06-05T07:08:26.798475+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "missing_bars_research_core_1d",
+      "source": "market",
+      "path": "data/interim/market/missing_bars_research_core_1d.csv",
+      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
+      "frequency": null,
+      "start": null,
+      "end": null,
+      "rows": 20203,
+      "columns": [
+        "symbol",
+        "interval",
+        "missing_timestamp"
+      ],
+      "generated_at": "2026-06-05T13:02:31.630736+00:00",
+      "source_url_or_provider": null,
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -373,7 +207,7 @@
         "interval",
         "missing_timestamp"
       ],
-      "generated_at": "2026-05-11T06:39:19.496371+00:00",
+      "generated_at": "2026-06-05T07:08:26.873831+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -392,7 +226,7 @@
         "interval",
         "missing_timestamp"
       ],
-      "generated_at": "2026-05-11T06:39:19.513669+00:00",
+      "generated_at": "2026-06-05T07:08:26.891176+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -400,45 +234,6 @@
     {
       "dataset_name": "processed_event_context_event_context_daily",
       "source": "event_context",
-      "path": "data/processed/event_context/event_context_daily.csv",
-      "symbol_or_series": "CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F",
-      "frequency": null,
-      "start": "2026-03-13T00:00:00+00:00",
-      "end": "2026-05-11T00:00:00+00:00",
-      "rows": 1080,
-      "columns": [
-        "timestamp",
-        "symbol",
-        "feature_available_at",
-        "llm_mode",
-        "overall_bias",
-        "impact_score",
-        "uncertainty",
-        "event_count",
-        "llm_input_news_count",
-        "explanation",
-        "warnings",
-        "directional_bias_score",
-        "impact_strength",
-        "time_decay",
-        "event_count_1d",
-        "event_count_3d",
-        "event_count_7d",
-        "bullish_event_score",
-        "bearish_event_score",
-        "macro_event_score",
-        "energy_event_score",
-        "geopolitical_event_score",
-        "source_quality_score"
-      ],
-      "generated_at": "2026-05-11T06:39:19.524035+00:00",
-      "source_url_or_provider": null,
-      "point_in_time_safe": true,
-      "notes": null
-    },
-    {
-      "dataset_name": "processed_event_context_daily",
-      "source": "events",
       "path": "data/processed/event_context/event_context_daily.csv",
       "symbol_or_series": "CL=F",
       "frequency": "daily",
@@ -468,30 +263,45 @@
         "macro_event_score",
         "energy_event_score",
         "geopolitical_event_score",
-        "source_quality_score"
+        "source_quality_score",
+        "news_volume_1d",
+        "news_volume_3d",
+        "news_volume_7d",
+        "news_volume_30d",
+        "news_selection_coverage",
+        "raw_bullish_pressure",
+        "raw_bearish_pressure",
+        "raw_net_pressure",
+        "raw_energy_pressure",
+        "raw_geopolitical_pressure",
+        "raw_macro_pressure",
+        "raw_supply_pressure",
+        "raw_demand_pressure",
+        "source_diversity_score"
       ],
-      "generated_at": "2026-06-04T11:41:28.009368+00:00",
+      "generated_at": "2026-06-05T07:08:26.918140+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
-      "notes": "llm_mode=google_generative; live=True"
+      "notes": null
     },
     {
       "dataset_name": "processed_event_context_llm_context_cache",
       "source": "event_context",
       "path": "data/processed/event_context/llm_context_cache.jsonl",
-      "symbol_or_series": "CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F",
-      "frequency": null,
-      "start": "2026-03-13T00:00:00+00:00",
-      "end": "2026-05-11T00:00:00+00:00",
-      "rows": 1080,
+      "symbol_or_series": "CL=F",
+      "frequency": "daily",
+      "start": "2016-11-01T00:00:00+00:00",
+      "end": "2026-05-08T00:00:00+00:00",
+      "rows": 3476,
       "columns": [
         "as_of_time",
         "symbol",
         "mode",
+        "input_hash",
         "input_news_count",
         "output"
       ],
-      "generated_at": "2026-05-11T06:39:23.818848+00:00",
+      "generated_at": "2026-06-05T07:08:30.844321+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -518,7 +328,7 @@
         "T10YIE",
         "VIXCLS"
       ],
-      "generated_at": "2026-05-11T06:39:19.565101+00:00",
+      "generated_at": "2026-06-05T07:08:26.957328+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -543,7 +353,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:19.769605+00:00",
+      "generated_at": "2026-06-05T07:08:27.124996+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -568,8 +378,33 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:20.074707+00:00",
+      "generated_at": "2026-06-05T07:08:27.239869+00:00",
       "source_url_or_provider": null,
+      "point_in_time_safe": true,
+      "notes": null
+    },
+    {
+      "dataset_name": "processed_market_panel_1d",
+      "source": "market",
+      "path": "data/processed/market_panel/1d/panel.csv",
+      "symbol_or_series": "BZ=F,CL=F,DX-Y.NYB,EURUSD=X,GC=F,HG=F,HO=F,JPY=X",
+      "frequency": null,
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 45528,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.622919+00:00",
+      "source_url_or_provider": "yfinance",
       "point_in_time_safe": true,
       "notes": null
     },
@@ -593,7 +428,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:21.098197+00:00",
+      "generated_at": "2026-06-05T07:08:27.798337+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -618,7 +453,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:21.241767+00:00",
+      "generated_at": "2026-06-05T07:08:27.917489+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -649,7 +484,7 @@
         "source",
         "feature_available_at"
       ],
-      "generated_at": "2026-05-11T06:39:21.282649+00:00",
+      "generated_at": "2026-06-05T07:08:27.942639+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -688,7 +523,7 @@
         "imports_exports_spread",
         "feature_available_at"
       ],
-      "generated_at": "2026-05-11T06:39:21.384698+00:00",
+      "generated_at": "2026-06-05T07:08:28.030541+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": true,
       "notes": null
@@ -717,7 +552,7 @@
         "as_of_time",
         "source"
       ],
-      "generated_at": "2026-05-11T06:39:21.391270+00:00",
+      "generated_at": "2026-06-05T07:08:28.037614+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -754,7 +589,7 @@
         "crude_exports_change",
         "imports_exports_spread"
       ],
-      "generated_at": "2026-05-11T06:39:21.407388+00:00",
+      "generated_at": "2026-06-05T07:08:28.053463+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -776,7 +611,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:21.818229+00:00",
+      "generated_at": "2026-06-05T07:08:28.407229+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -801,7 +636,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:21.863206+00:00",
+      "generated_at": "2026-06-05T07:08:28.424552+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -826,7 +661,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:21.904895+00:00",
+      "generated_at": "2026-06-05T07:08:28.439295+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -851,7 +686,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:21.958397+00:00",
+      "generated_at": "2026-06-05T07:08:28.454883+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -876,7 +711,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.017179+00:00",
+      "generated_at": "2026-06-05T07:08:28.474132+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -901,7 +736,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.056296+00:00",
+      "generated_at": "2026-06-05T07:08:28.488954+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -926,7 +761,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.103309+00:00",
+      "generated_at": "2026-06-05T07:08:28.503544+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -951,7 +786,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.142096+00:00",
+      "generated_at": "2026-06-05T07:08:28.517833+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -976,7 +811,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.189194+00:00",
+      "generated_at": "2026-06-05T07:08:28.537661+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1001,7 +836,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.229615+00:00",
+      "generated_at": "2026-06-05T07:08:28.552313+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1026,7 +861,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.249465+00:00",
+      "generated_at": "2026-06-05T07:08:28.559175+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1051,7 +886,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.288581+00:00",
+      "generated_at": "2026-06-05T07:08:28.574429+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1076,7 +911,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.324261+00:00",
+      "generated_at": "2026-06-05T07:08:28.588181+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1101,7 +936,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.344869+00:00",
+      "generated_at": "2026-06-05T07:08:28.594472+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1126,7 +961,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.388339+00:00",
+      "generated_at": "2026-06-05T07:08:28.610207+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1151,7 +986,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.408534+00:00",
+      "generated_at": "2026-06-05T07:08:28.616542+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1176,7 +1011,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.430552+00:00",
+      "generated_at": "2026-06-05T07:08:28.624032+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1201,7 +1036,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.449806+00:00",
+      "generated_at": "2026-06-05T07:08:28.631196+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1226,7 +1061,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.471357+00:00",
+      "generated_at": "2026-06-05T07:08:28.642893+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1251,9 +1086,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.489857+00:00",
+      "generated_at": "2026-06-05T07:08:28.651579+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_BZ_F_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/BZ_F.csv",
+      "symbol_or_series": "BZ=F",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2516,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.648154+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1276,9 +1136,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.507955+00:00",
+      "generated_at": "2026-06-05T07:08:28.660439+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_CL_F_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/CL_F.csv",
+      "symbol_or_series": "CL=F",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2514,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.639629+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1301,9 +1186,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.523245+00:00",
+      "generated_at": "2026-06-05T07:08:28.669672+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_DX-Y.NYB_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/DX-Y.NYB.csv",
+      "symbol_or_series": "DX-Y.NYB",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2515,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.705959+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1326,9 +1236,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.537873+00:00",
+      "generated_at": "2026-06-05T07:08:28.678703+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_EURUSD_X_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/EURUSD_X.csv",
+      "symbol_or_series": "EURUSD=X",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2602,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.714758+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1351,9 +1286,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.551933+00:00",
+      "generated_at": "2026-06-05T07:08:28.687493+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_GC_F_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/GC_F.csv",
+      "symbol_or_series": "GC=F",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2514,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.681409+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1376,9 +1336,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.566487+00:00",
+      "generated_at": "2026-06-05T07:08:28.697144+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_HG_F_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/HG_F.csv",
+      "symbol_or_series": "HG=F",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2515,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.697909+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1401,9 +1386,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.580114+00:00",
+      "generated_at": "2026-06-05T07:08:28.707428+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_HO_F_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/HO_F.csv",
+      "symbol_or_series": "HO=F",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2516,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.673078+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1426,9 +1436,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.593539+00:00",
+      "generated_at": "2026-06-05T07:08:28.717166+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_JPY_X_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/JPY_X.csv",
+      "symbol_or_series": "JPY=X",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2602,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.731817+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1451,9 +1486,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.606969+00:00",
+      "generated_at": "2026-06-05T07:08:28.725988+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_NG_F_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/NG_F.csv",
+      "symbol_or_series": "NG=F",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2516,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.656613+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1476,9 +1536,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.620182+00:00",
+      "generated_at": "2026-06-05T07:08:28.734692+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_QQQ_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/QQQ.csv",
+      "symbol_or_series": "QQQ",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-04T00:00:00+00:00",
+      "rows": 2514,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.748057+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1501,9 +1586,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.633996+00:00",
+      "generated_at": "2026-06-05T07:08:28.744514+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_RB_F_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/RB_F.csv",
+      "symbol_or_series": "RB=F",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2516,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.664913+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1526,9 +1636,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.647049+00:00",
+      "generated_at": "2026-06-05T07:08:28.754001+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_SI_F_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/SI_F.csv",
+      "symbol_or_series": "SI=F",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2514,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.689714+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1551,9 +1686,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.659966+00:00",
+      "generated_at": "2026-06-05T07:08:28.762581+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_SPY_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/SPY.csv",
+      "symbol_or_series": "SPY",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-04T00:00:00+00:00",
+      "rows": 2514,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.739870+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1576,9 +1736,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.671930+00:00",
+      "generated_at": "2026-06-05T07:08:28.773090+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_USDKRW_X_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/USDKRW_X.csv",
+      "symbol_or_series": "USDKRW=X",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2602,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.723379+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1601,9 +1786,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.683143+00:00",
+      "generated_at": "2026-06-05T07:08:28.781979+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_USO_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/USO.csv",
+      "symbol_or_series": "USO",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-04T00:00:00+00:00",
+      "rows": 2514,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.780321+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1626,9 +1836,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.693902+00:00",
+      "generated_at": "2026-06-05T07:08:28.791316+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market_XLE_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/XLE.csv",
+      "symbol_or_series": "XLE",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-04T00:00:00+00:00",
+      "rows": 2514,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.772336+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1651,9 +1886,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.705346+00:00",
+      "generated_at": "2026-06-05T07:08:28.801014+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market__GSPC_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/_GSPC.csv",
+      "symbol_or_series": "^GSPC",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-04T00:00:00+00:00",
+      "rows": 2514,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.756160+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1676,9 +1936,34 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.716649+00:00",
+      "generated_at": "2026-06-05T07:08:28.809764+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
+      "notes": null
+    },
+    {
+      "dataset_name": "raw_market__VIX_1d",
+      "source": "market",
+      "path": "data/raw/market/yfinance/1d/_VIX.csv",
+      "symbol_or_series": "^VIX",
+      "frequency": "daily",
+      "start": "2016-06-06T00:00:00+00:00",
+      "end": "2026-06-05T00:00:00+00:00",
+      "rows": 2516,
+      "columns": [
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "provider",
+        "fetched_at"
+      ],
+      "generated_at": "2026-06-05T13:02:31.764328+00:00",
+      "source_url_or_provider": "yfinance",
+      "point_in_time_safe": true,
       "notes": null
     },
     {
@@ -1701,7 +1986,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.759972+00:00",
+      "generated_at": "2026-06-05T07:08:28.847769+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1726,7 +2011,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.797359+00:00",
+      "generated_at": "2026-06-05T07:08:28.888452+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1751,7 +2036,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.840059+00:00",
+      "generated_at": "2026-06-05T07:08:28.930090+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1776,7 +2061,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.895344+00:00",
+      "generated_at": "2026-06-05T07:08:28.979594+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1801,7 +2086,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.939974+00:00",
+      "generated_at": "2026-06-05T07:08:29.026392+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1826,7 +2111,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:22.983673+00:00",
+      "generated_at": "2026-06-05T07:08:29.070630+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1851,7 +2136,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.026251+00:00",
+      "generated_at": "2026-06-05T07:08:29.112547+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1876,7 +2161,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.081575+00:00",
+      "generated_at": "2026-06-05T07:08:29.166065+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1901,7 +2186,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.127366+00:00",
+      "generated_at": "2026-06-05T07:08:29.209700+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1926,7 +2211,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.147182+00:00",
+      "generated_at": "2026-06-05T07:08:29.225955+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1951,7 +2236,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.199225+00:00",
+      "generated_at": "2026-06-05T07:08:29.263128+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -1976,7 +2261,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.252724+00:00",
+      "generated_at": "2026-06-05T07:08:29.301340+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2001,7 +2286,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.274702+00:00",
+      "generated_at": "2026-06-05T07:08:29.317281+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2026,7 +2311,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.335535+00:00",
+      "generated_at": "2026-06-05T07:08:29.361516+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2051,7 +2336,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.355488+00:00",
+      "generated_at": "2026-06-05T07:08:29.377322+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2076,7 +2361,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.375914+00:00",
+      "generated_at": "2026-06-05T07:08:29.393141+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2101,7 +2386,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.396269+00:00",
+      "generated_at": "2026-06-05T07:08:29.409198+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2126,7 +2411,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.430463+00:00",
+      "generated_at": "2026-06-05T07:08:29.436756+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2151,7 +2436,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.441739+00:00",
+      "generated_at": "2026-06-05T07:08:29.445617+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2176,7 +2461,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.454808+00:00",
+      "generated_at": "2026-06-05T07:08:29.456357+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2201,7 +2486,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.467860+00:00",
+      "generated_at": "2026-06-05T07:08:29.465363+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2226,7 +2511,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.484460+00:00",
+      "generated_at": "2026-06-05T07:08:29.476514+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2251,7 +2536,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.500419+00:00",
+      "generated_at": "2026-06-05T07:08:29.485326+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2276,7 +2561,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.518824+00:00",
+      "generated_at": "2026-06-05T07:08:29.493963+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2301,7 +2586,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.539234+00:00",
+      "generated_at": "2026-06-05T07:08:29.502080+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2326,7 +2611,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.567277+00:00",
+      "generated_at": "2026-06-05T07:08:29.512261+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2351,7 +2636,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.592954+00:00",
+      "generated_at": "2026-06-05T07:08:29.520910+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2376,7 +2661,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.607892+00:00",
+      "generated_at": "2026-06-05T07:08:29.525237+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2401,7 +2686,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.632683+00:00",
+      "generated_at": "2026-06-05T07:08:29.533423+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2426,7 +2711,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.655789+00:00",
+      "generated_at": "2026-06-05T07:08:29.541667+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2451,7 +2736,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.667931+00:00",
+      "generated_at": "2026-06-05T07:08:29.545746+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2476,7 +2761,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.692549+00:00",
+      "generated_at": "2026-06-05T07:08:29.555118+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2501,7 +2786,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.706095+00:00",
+      "generated_at": "2026-06-05T07:08:29.559187+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2526,7 +2811,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.718141+00:00",
+      "generated_at": "2026-06-05T07:08:29.563190+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2551,7 +2836,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.729305+00:00",
+      "generated_at": "2026-06-05T07:08:29.567457+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2576,7 +2861,7 @@
         "provider",
         "fetched_at"
       ],
-      "generated_at": "2026-05-11T06:39:23.745588+00:00",
+      "generated_at": "2026-06-05T07:08:29.574707+00:00",
       "source_url_or_provider": null,
       "point_in_time_safe": false,
       "notes": null
@@ -2585,11 +2870,11 @@
       "dataset_name": "raw_news_public_market_news",
       "source": "news",
       "path": "data/raw/news/public_market_news.csv",
-      "symbol_or_series": "NG=F,CL=F,BZ=F,RB=F,HO=F,EURUSD=X,DX-Y.NYB,USDKRW=X",
+      "symbol_or_series": "NG=F,RB=F,HO=F,CL=F,BZ=F,JPY=X,USDKRW=X,DX-Y.NYB",
       "frequency": null,
       "start": "2016-11-01T07:00:00+00:00",
-      "end": "2026-06-04T10:49:32+00:00",
-      "rows": 148050,
+      "end": "2026-06-05T12:50:36+00:00",
+      "rows": 148368,
       "columns": [
         "published_at",
         "symbol",
@@ -2599,7 +2884,7 @@
         "url",
         "retrieved_at"
       ],
-      "generated_at": "2026-06-04T11:11:02.366089+00:00",
+      "generated_at": "2026-06-05T13:03:17.040044+00:00",
       "source_url_or_provider": "yahoo_finance_rss,gdelt_doc_api",
       "point_in_time_safe": false,
       "notes": null

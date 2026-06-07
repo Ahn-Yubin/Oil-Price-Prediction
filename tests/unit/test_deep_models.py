@@ -33,9 +33,11 @@ def test_oil_context_fusion_forward_shapes_cpu():
     model = OilContextFusion(price_feature_dim=6, cross_asset_dim=4, event_context_dim=13, static_dim=4, horizon=5)
     output = model(x_price, x_cross, x_event, x_static)
     _assert_output(output, 5)
-    assert output["expert_weights"].shape == (3, 6)
+    assert output["expert_weights"].shape == (3, 7)
+    assert output["expected_path_range"].shape == (3, 1)
+    assert output["shock_probability"].shape == (3, 1)
     assert torch.allclose(output["expert_weights"].sum(dim=-1), torch.ones(3), atol=1e-5)
-    assert output["expert_names"] == ("lstm", "tcn", "attention", "context", "pattern", "motif")
+    assert output["expert_names"] == ("lstm", "tcn", "attention", "context", "pattern", "motif", "event_shock")
 
 
 def test_llm_context_seq_moe_forward_zero_and_nonzero_context():

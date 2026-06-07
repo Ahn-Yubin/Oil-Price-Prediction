@@ -22,6 +22,9 @@ def test_metric_functions_and_probabilistic_metrics():
     pred = np.array([100.5, 100.8, 103.0])
     metrics = point_metrics(pred, actual, np.array([98.0, 99.0, 100.0]))
     assert metrics["mae"] > 0
+    assert metrics["mape"] > 0
+    assert "shape_score" in metrics
+    assert metrics["range_ratio"] > 0
     paths = _quantile_paths_from_point(np.array([0.0, 0.01, 0.02]), _close())
     prob = probabilistic_metrics(paths, np.array([0.0, 0.015, 0.018]))
     assert prob["pinball_loss"] >= 0
@@ -85,6 +88,8 @@ def test_small_synthetic_backtest_and_output_files(tmp_path):
     assert not outputs["probabilistic_metrics"].empty
     assert not outputs["regime_metrics"].empty
     assert "origin_start" in outputs["summary"].columns
+    assert "mape" in outputs["summary"].columns
+    assert "shape_score" in outputs["summary"].columns
     assert "leakage_audit_status" in outputs["details"].columns
     written = write_backtest_outputs(outputs, tmp_path, "SYN_1d")
     assert all(path.exists() for path in written)

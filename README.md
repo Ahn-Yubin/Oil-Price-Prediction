@@ -28,9 +28,13 @@
 - `GET /api/data-status?symbol=CL=F&interval=1d`
 - `GET /api/forecast?symbol=CL=F&interval=1d`
 - `GET /api/chart?symbol=CL=F&interval=1d`
+- `GET /api/dashboard-analysis?symbol=CL=F&interval=1d&horizon=30`
 - `GET /api/market-context?symbol=CL=F&interval=1d`
 - `GET /api/explanation`
 - `GET /api/backtests`
+- `GET /api/backtests/visualization`
+
+운영 dashboard는 `CL=F · 1D · 30일` 경로를 고정 표시하고, 같은 h30 출력 위에 1주/2주/한달 endpoint marker를 찍습니다. AI 시황 해설, 뉴스 해석, 예측 리포트는 `/api/dashboard-analysis`의 한 번의 외부 LLM 응답을 패널별로 나눠 표시합니다.
 
 ## 현재 데이터 상태
 

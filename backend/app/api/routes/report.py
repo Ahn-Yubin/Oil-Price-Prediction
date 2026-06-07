@@ -29,6 +29,9 @@ class ForecastReport(BaseModel):
     symbol: str
     interval: str
     horizon: int
+    mode: str = "deterministic_report"
+    llm_used: bool = False
+    source_note: str | None = None
     title: str
     executive_summary: str
     recommendation_note: str
@@ -130,23 +133,23 @@ def _model_path_summary(paths: list[dict[str, Any]], current_price: float, langu
     return bullets
 
 
-def _market_context_summary(summary: dict[str, Any], language: str) -> list[str]:
-    bullets: list[str] = []
-    if not summary:
-        return bullets
-    bias = summary.get("overall_bias")
-    impact = summary.get("impact_score")
-    uncertainty = summary.get("uncertainty")
-    explanation = summary.get("explanation")
-    if bias:
-        bullets.append(f"컨텍스트 방향성: {bias}" if language == "ko" else f"Context bias: {bias}")
-    if impact is not None:
-        bullets.append(f"컨텍스트 영향 점수: {float(impact):.2f}" if language == "ko" else f"Context impact score: {float(impact):.2f}")
-    if uncertainty is not None:
-        bullets.append(f"컨텍스트 불확실성: {float(uncertainty):.2f}" if language == "ko" else f"Context uncertainty: {float(uncertainty):.2f}")
-    if explanation:
-        bullets.append(str(explanation))
-    return bullets
+def _public_adapter_read(path_adapter: dict[str, Any] | None, language: str) -> str:
+    adapter = str((path_adapter or {}).get("adapter") or "")
+    if language == "ko":
+        return {
+            "geopolitical_supply_shock": "지정학적 긴장과 공급 차질 가능성이 유가에 프리미엄을 더한 것으로 해석됩니다.",
+            "bullish_event_breakout": "뉴스 분위기와 최근 가격 흐름이 상방 돌파 가능성을 키운 것으로 해석됩니다.",
+            "event_risk_premium": "에너지와 지정학 관련 뉴스가 이어지면서 하방보다 상방 위험을 더 크게 반영했습니다.",
+            "overextended_mean_reversion": "최근 가격 흐름이 빠르게 올라 단기 되돌림 가능성도 함께 반영했습니다.",
+            "pattern_residual_detemplate": "최근 차트의 고점과 저점 흐름을 반영해 단순 직선 예측을 피했습니다.",
+        }.get(adapter, "")
+    return {
+        "geopolitical_supply_shock": "Geopolitical tension and possible supply disruption appear to be adding a crude-risk premium.",
+        "bullish_event_breakout": "News tone and recent price action point to a possible upside breakout setup.",
+        "event_risk_premium": "Energy and geopolitical headlines are adding more upside risk than downside risk.",
+        "overextended_mean_reversion": "Recent price action looks stretched, so the path also allows for short-term cooling.",
+        "pattern_residual_detemplate": "The path reflects recent peaks and troughs instead of a straight-line forecast.",
+    }.get(adapter, "")
 
 
 def _markdown(report: ForecastReport, language: str) -> str:
@@ -193,7 +196,7 @@ def _markdown(report: ForecastReport, language: str) -> str:
     lines.extend(["", f"## {labels['sections']}"])
     for section in report.sections:
         lines.extend(["", f"### {section.title}", section.body])
-        lines.extend(f"- {bullet}" for bullet in section.bullets)
+        lines.extend(bullet for bullet in section.bullets)
     if report.warnings:
         lines.extend(["", f"## {labels['warnings']}"])
         lines.extend(f"- {warning}" for warning in report.warnings)
@@ -237,7 +240,6 @@ def forecast_report(
     direction = "upside" if median_change > 0.25 else "downside" if median_change < -0.25 else "range-bound"
     regime = _dominant_regime(response.regime)
     regime_label = _label_direction(regime, language)
-    confidence = float(first.confidence) if first else None
 
     generated_at = datetime.now(timezone.utc)
     horizon = len(response.forecast)
@@ -253,71 +255,86 @@ def forecast_report(
     if language == "ko":
         executive = (
             f"작성일 {generated_date} 기준 예측기간은 {period_text}입니다. "
-            f"현재 예측 모델은 {horizon_text}까지 중앙 경로가 "
-            f"{_label_direction(direction, language)} 흐름에 가깝다고 봅니다. 현재가는 {_fmt_price(current)}, "
+            f"현재 유가는 {_fmt_price(current)}이며, 모델은 {horizon_text}까지 "
+            f"{_label_direction(direction, language)} 흐름에 가까운 시나리오를 우선 보고 있습니다. "
             f"{horizon_text} 중앙값은 {_fmt_price(median_end)}({_fmt_pct(median_change)})이며, "
-            f"{horizon_text} P10-P90 범위는 대략 {_fmt_price(p10_end)}에서 {_fmt_price(p90_end)}입니다. "
-            f"감지된 주요 시장 국면은 {regime_label}입니다."
+            f"예상 변동 범위는 대략 {_fmt_price(p10_end)}에서 {_fmt_price(p90_end)}입니다. "
+            f"현재 시장 흐름은 {regime_label}에 가깝습니다."
         )
     else:
         direction_article = "an" if direction[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
         executive = (
             f"As of {generated_date}, the forecast period is {period_text}. "
-            f"The forecast model points to {direction_article} {direction} median path {horizon_text}. "
+            f"Crude is at {_fmt_price(current)}, and the model points to {direction_article} {direction} scenario {horizon_text}. "
             f"Current price is {_fmt_price(current)}, the {horizon_text} median estimate is "
-            f"{_fmt_price(median_end)} ({_fmt_pct(median_change)}), with an end-band range near "
+            f"{_fmt_price(median_end)} ({_fmt_pct(median_change)}), with an expected range near "
             f"{_fmt_price(p10_end)} to {_fmt_price(p90_end)}. The dominant detected regime is {regime}."
         )
 
+    primary_adapter = {}
+    if response.primary_model:
+        primary_adapter = (response.deep_model_info.get(response.primary_model) or {}).get("path_adapter") or {}
+    adapter_read = _public_adapter_read(primary_adapter, language)
+    direction_read = (
+        "상방 압력이 우세하지만, 실제 경로는 뉴스 변화와 단기 수급에 따라 흔들릴 수 있습니다."
+        if language == "ko" and direction == "upside"
+        else "하방 압력이 우세하지만, 공급 뉴스가 바뀌면 반등이 빨라질 수 있습니다."
+        if language == "ko" and direction == "downside"
+        else "뚜렷한 한쪽 방향보다 박스권 안에서의 등락 가능성이 더 크게 반영됐습니다."
+        if language == "ko"
+        else "Upside pressure is dominant, but the actual path can still swing with news and short-term supply-demand changes."
+        if direction == "upside"
+        else "Downside pressure is dominant, but supply headlines can still trigger a quick rebound."
+        if direction == "downside"
+        else "The model sees more range-bound movement than a decisive directional break."
+    )
     sections = [
         ReportSection(
-            title="예측 경로" if language == "ko" else "Forecast Path",
+            title="핵심 전망" if language == "ko" else "Core View",
             body=(
-                "중앙값과 분위수 경로는 모델 파이프라인의 산출물이며, 매매 지시가 아닙니다."
+                f"{horizon_text} 기준 중앙 전망은 {_fmt_price(median_end)}이며 현재가 대비 {_fmt_pct(median_change)}입니다. "
+                f"예상 범위는 {_fmt_price(p10_end)}에서 {_fmt_price(p90_end)} 사이로 넓게 열려 있어, 방향성은 있지만 변동성도 함께 고려해야 합니다."
                 if language == "ko"
-                else "Median and quantile paths are produced by the model forecast pipeline; they are not trading instructions."
+                else f"The {horizon_text} median view is {_fmt_price(median_end)}, or {_fmt_pct(median_change)} from the current price. "
+                f"The expected range is broad, from {_fmt_price(p10_end)} to {_fmt_price(p90_end)}, so the directional view should be read together with volatility."
             ),
             bullets=[
-                f"작성일: {generated_date}" if language == "ko" else f"Report date: {generated_date}",
-                f"예측기간: {period_text}" if language == "ko" else f"Forecast period: {period_text}",
-                f"현재가: {_fmt_price(current)}" if language == "ko" else f"Current price: {_fmt_price(current)}",
-                (
-                    f"{horizon_text} 중앙값: {_fmt_price(median_end)} ({_fmt_pct(median_change)})"
-                    if language == "ko"
-                    else f"{horizon_text.title()} median estimate: {_fmt_price(median_end)} ({_fmt_pct(median_change)})"
-                ),
-                (
-                    f"{horizon_text} P10-P90 범위: {_fmt_price(p10_end)} - {_fmt_price(p90_end)}"
-                    if language == "ko"
-                    else f"{horizon_text.title()} P10-P90 range: {_fmt_price(p10_end)} - {_fmt_price(p90_end)}"
-                ),
+                direction_read,
             ],
         ),
         ReportSection(
-            title="리스크와 컨텍스트" if language == "ko" else "Risk And Context",
+            title="시황 해석" if language == "ko" else "Market Read",
             body=(
-                "시장 국면, 밴드 보정 상태, 컨텍스트 신호는 예측 신뢰도를 해석하는 보조 정보입니다."
+                (
+                    f"현재 시장은 {regime_label} 흐름에 가까우며, 최근 차트와 뉴스 흐름을 함께 보면 {adapter_read or direction_read}"
+                )
                 if language == "ko"
-                else "Regime, calibration, and context signals help explain forecast reliability."
+                else (
+                    f"The market currently looks closest to a {regime} regime. Taken together with recent chart and news flow, "
+                    f"{adapter_read or direction_read}"
+                )
             ),
             bullets=[
-                f"주요 시장 국면: {regime_label}" if language == "ko" else f"Dominant regime: {regime}",
                 (
-                    f"예측 신뢰도: {round(confidence * 100)}%"
-                    if language == "ko" and confidence is not None
-                    else "예측 신뢰도: -"
+                    "특히 원유 재고, OPEC 관련 발언, 중동과 러시아를 둘러싼 공급 뉴스, 달러와 금리 흐름이 앞으로의 방향성을 좌우할 가능성이 큽니다."
                     if language == "ko"
-                    else f"Forecast confidence: {round(confidence * 100)}%"
-                    if confidence is not None
-                    else "Forecast confidence: -"
-                ),
-                f"데이터 상태: {response.data_status.status}" if language == "ko" else f"Data status: {response.data_status.status}",
+                    else "Inventories, OPEC communication, Middle East and Russia supply headlines, and dollar/rate moves are likely to matter most for the next leg."
+                )
+            ],
+        ),
+        ReportSection(
+            title="확인할 변수" if language == "ko" else "What To Watch",
+            body=(
+                "상승 시나리오가 이어지려면 공급 차질 우려가 유지되거나 수요 둔화 우려가 완화되어야 합니다. 반대로 달러 강세, 금리 상승, 재고 증가, 지정학 긴장 완화는 예측 경로를 낮출 수 있습니다."
+                if language == "ko"
+                else "For the upside scenario to persist, supply-disruption concerns need to remain in place or demand worries need to ease. A stronger dollar, higher rates, rising inventories, or easing geopolitical tension could pull the path lower."
+            ),
+            bullets=[
                 (
-                    f"밴드 상태: {response.calibration_status.get('calibration_status', 'unknown')}"
+                    "따라서 이 리포트는 하나의 숫자보다 가격 흐름, 뉴스 흐름, 수급 변화를 함께 읽는 자료로 보는 편이 적절합니다."
                     if language == "ko"
-                    else f"Band status: {response.calibration_status.get('calibration_status', 'unknown')}"
-                ),
-                *_market_context_summary(response.llm_context_summary, language),
+                    else "This report is best read as a combined view of price action, news flow, and supply-demand changes rather than as a single number."
+                )
             ],
         ),
     ]
@@ -332,6 +349,13 @@ def forecast_report(
         symbol=response.symbol,
         interval=response.interval,
         horizon=horizon,
+        mode="deterministic_report",
+        llm_used=False,
+        source_note=(
+            "이 리포트는 외부 LLM fallback이 아니라 모델 예측값과 규칙 기반 문장 템플릿으로 작성됩니다."
+            if language == "ko"
+            else "This report is generated from model outputs and rule-based prose templates, not an external LLM fallback."
+        ),
         title=title,
         executive_summary=executive,
         recommendation_note="",
@@ -341,10 +365,8 @@ def forecast_report(
             ("현재가" if language == "ko" else "current_price"): _fmt_price(current),
             (f"{horizon_text}_중앙값" if language == "ko" else f"{horizon_text}_median"): _fmt_price(median_end),
             ("중앙값_변화율" if language == "ko" else "median_change"): _fmt_pct(median_change),
-            (f"{horizon_text}_P10" if language == "ko" else f"{horizon_text}_p10"): _fmt_price(p10_end),
-            (f"{horizon_text}_P90" if language == "ko" else f"{horizon_text}_p90"): _fmt_price(p90_end),
-            ("주요_시장_국면" if language == "ko" else "dominant_regime"): regime_label if language == "ko" else regime,
-            ("신뢰도" if language == "ko" else "confidence"): f"{round(confidence * 100)}%" if confidence is not None else "-",
+            ("예상_변동_범위" if language == "ko" else "expected_range"): f"{_fmt_price(p10_end)} - {_fmt_price(p90_end)}",
+            ("시장_흐름" if language == "ko" else "market_flow"): regime_label if language == "ko" else regime,
             ("작성_시각" if language == "ko" else "generated_at_local"): generated_datetime,
         },
         sections=sections,

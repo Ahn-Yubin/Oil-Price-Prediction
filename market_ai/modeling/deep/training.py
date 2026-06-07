@@ -37,7 +37,7 @@ def _make_model(model_name: str, dataset: DeepDataset, *, hidden_dim: int = 48, 
         "dropout": dropout,
     }
     if model_name == "oil_context_fusion":
-        return OilContextFusion(**{**kwargs, "hidden_dim": max(hidden_dim, 72), "dropout": max(dropout, 0.12)})
+        return OilContextFusion(**{**kwargs, "hidden_dim": max(hidden_dim, 96), "dropout": max(dropout, 0.12)})
     if model_name == "deep_lstm_tcn_fusion":
         return DeepLstmTcnFusion(**kwargs)
     if model_name == "llm_context_seq_moe":
@@ -79,10 +79,14 @@ def _point_metrics(
     true_log_path: np.ndarray,
     pred_log_path: np.ndarray,
 ) -> dict[str, float]:
-    pred_price = np.asarray(pred_price, dtype=np.float64).reshape(-1)
-    actual_price = np.asarray(actual_price, dtype=np.float64).reshape(-1)
-    true_log_path = np.asarray(true_log_path, dtype=np.float64).reshape(-1)
-    pred_log_path = np.asarray(pred_log_path, dtype=np.float64).reshape(-1)
+    pred_price_raw = np.asarray(pred_price, dtype=np.float64)
+    actual_price_raw = np.asarray(actual_price, dtype=np.float64)
+    true_log_path_raw = np.asarray(true_log_path, dtype=np.float64)
+    pred_log_path_raw = np.asarray(pred_log_path, dtype=np.float64)
+    pred_price = pred_price_raw.reshape(-1)
+    actual_price = actual_price_raw.reshape(-1)
+    true_log_path = true_log_path_raw.reshape(-1)
+    pred_log_path = pred_log_path_raw.reshape(-1)
     mask = np.isfinite(pred_price) & np.isfinite(actual_price) & (actual_price > 0.0)
     if not np.any(mask):
         return {
@@ -94,6 +98,13 @@ def _point_metrics(
             "mape": float("nan"),
             "smape": float("nan"),
             "directional_accuracy": float("nan"),
+            "step_directional_accuracy": float("nan"),
+            "final_ape_pct": float("nan"),
+            "pred_turns": float("nan"),
+            "actual_turns": float("nan"),
+            "turn_error": float("nan"),
+            "range_ratio": float("nan"),
+            "shape_score": float("nan"),
         }
     pred = pred_price[mask]
     actual = actual_price[mask]
@@ -105,10 +116,8 @@ def _point_metrics(
     denom = float(np.sum((actual - actual_mean) ** 2))
     smape_denom = np.maximum((np.abs(pred) + np.abs(actual)) / 2.0, 1e-8)
     log_mask = np.isfinite(pred_log_path) & np.isfinite(true_log_path)
-    if np.any(log_mask):
-        direction = float(np.mean(np.sign(pred_log_path[log_mask]) == np.sign(true_log_path[log_mask])))
-    else:
-        direction = float("nan")
+    direction = float(np.mean(np.sign(pred_log_path[log_mask]) == np.sign(true_log_path[log_mask]))) if np.any(log_mask) else float("nan")
+    shape = _path_shape_metrics(pred_price_raw, actual_price_raw)
     return {
         "sse": sse,
         "mse": mse,
@@ -118,6 +127,78 @@ def _point_metrics(
         "mape": float(np.mean(abs_errors / np.maximum(np.abs(actual), 1e-8)) * 100.0),
         "smape": float(np.mean(abs_errors / smape_denom) * 100.0),
         "directional_accuracy": direction,
+        **shape,
+    }
+
+
+def _as_2d(values: np.ndarray) -> np.ndarray:
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.ndim == 1:
+        return arr.reshape(1, -1)
+    return arr.reshape(arr.shape[0], -1)
+
+
+def _turn_count(values: np.ndarray) -> int:
+    diff = np.diff(np.asarray(values, dtype=np.float64))
+    diff = diff[np.isfinite(diff) & (diff != 0.0)]
+    if len(diff) < 2:
+        return 0
+    return int(np.sum(np.diff(np.sign(diff)) != 0))
+
+
+def _path_shape_metrics(pred_price: np.ndarray, actual_price: np.ndarray) -> dict[str, float]:
+    pred_rows = _as_2d(pred_price)
+    actual_rows = _as_2d(actual_price)
+    metrics: list[dict[str, float]] = []
+    for pred_row, actual_row in zip(pred_rows, actual_rows):
+        mask = np.isfinite(pred_row) & np.isfinite(actual_row) & (actual_row > 0.0)
+        pred = pred_row[mask]
+        actual = actual_row[mask]
+        if len(pred) == 0:
+            continue
+        ape = np.abs(pred - actual) / np.maximum(np.abs(actual), 1e-8)
+        pred_turns = _turn_count(pred)
+        actual_turns = _turn_count(actual)
+        actual_range = float(np.max(actual) - np.min(actual)) if len(actual) else 0.0
+        pred_range = float(np.max(pred) - np.min(pred)) if len(pred) else 0.0
+        range_ratio = pred_range / max(actual_range, 1e-8)
+        turn_error = abs(pred_turns - actual_turns) / max(actual_turns, 1)
+        step_direction = (
+            float(np.mean(np.sign(np.diff(pred)) == np.sign(np.diff(actual))))
+            if len(pred) > 1
+            else float("nan")
+        )
+        shape_score = max(
+            0.0,
+            100.0
+            - 45.0 * min(turn_error, 2.0)
+            - 35.0 * min(abs(np.log(max(range_ratio, 1e-6))), 2.0)
+            + 20.0 * (step_direction if np.isfinite(step_direction) else 0.0),
+        )
+        metrics.append(
+            {
+                "step_directional_accuracy": step_direction,
+                "final_ape_pct": float(ape[-1] * 100.0),
+                "pred_turns": float(pred_turns),
+                "actual_turns": float(actual_turns),
+                "turn_error": float(turn_error),
+                "range_ratio": float(range_ratio),
+                "shape_score": float(shape_score),
+            }
+        )
+    if not metrics:
+        return {
+            "step_directional_accuracy": float("nan"),
+            "final_ape_pct": float("nan"),
+            "pred_turns": float("nan"),
+            "actual_turns": float("nan"),
+            "turn_error": float("nan"),
+            "range_ratio": float("nan"),
+            "shape_score": float("nan"),
+        }
+    return {
+        key: float(np.nanmean([row[key] for row in metrics]))
+        for key in metrics[0]
     }
 
 

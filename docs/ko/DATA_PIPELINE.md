@@ -12,8 +12,8 @@
 | EIA petroleum | `data/processed/oil_fundamentals/eia_weekly.csv` | EIA petroleum weekly bulk에서 추출한 재고/수급 계열 | 원유 fundamental feature |
 | CFTC COT | `data/processed/oil_fundamentals/cftc_cot_weekly.csv` | CFTC Commitment of Traders 포지셔닝 | managed money/commercial positioning feature |
 | Macro panel | `data/processed/macro_panel/fred_daily_wide.csv` | FRED macro rates/indices daily wide panel | macro/rates cross-asset feature |
-| Event context | `data/processed/event_context/event_context_daily.csv` | 뉴스/이벤트를 daily context vector로 변환한 데이터 | `oil_context_fusion` event/context input |
-| Raw news | `data/raw/news/public_market_news.csv` | Yahoo Finance RSS, Google News RSS, GDELT 등 공개 뉴스 원문 | LLM context 생성 입력 |
+| Event context | `data/processed/event_context/event_context_daily.csv` | 뉴스/이벤트를 daily context vector로 변환한 데이터. LLM 13개 feature와 원시 뉴스 풀 aggregate 14개 feature를 합쳐 27차원입니다. | `oil_context_fusion` event/context input |
+| Raw news | `data/raw/news/public_market_news.csv` | Yahoo Finance RSS, Google News RSS backfill, public RSS, GDELT 등 공개 뉴스 원문 | LLM context 생성 입력 |
 | Manifest | `data/manifests/data_inventory.json` | dataset별 rows, 기간, source, point-in-time safety 기록 | 데이터 감시와 재현성 |
 
 EIA/CFTC는 weekly 데이터이므로 daily sample에는 보수적인 available timestamp 기준으로 forward-fill됩니다. 뉴스와 event context는 timestamp가 sample origin 이후인 행을 사용하지 않습니다.
@@ -33,29 +33,30 @@ EIA/CFTC는 weekly 데이터이므로 daily sample에는 보수적인 available 
 
 | Dataset | Rows | 기간 | 비고 |
 | --- | ---: | --- | --- |
-| `market_panel/1d` | 45,523 | 2016-05-09 ~ 2026-05-08 | 18 symbols, 10년 daily 학습 가능 |
+| `market_panel/1d` | 45,528 | 2016-06-06 ~ 2026-06-05 | 18 symbols, 10년 daily 학습 가능 |
 | `market_panel/1h` | 208,056 | 2023-06-05 ~ 2026-05-04 | intraday 1h |
 | `market_panel/30m` | 33,765 | 2026-02-05 ~ 2026-05-04 | Yahoo interval 제한으로 짧음 |
 | `market_panel/15m` | 67,207 | 2026-02-05 ~ 2026-05-04 | Yahoo interval 제한으로 짧음 |
 | `eia_weekly` | 15,966 | 1982-08-25 ~ 2026-05-11 | 원유 수급/재고 |
 | `cftc_cot_weekly` | 3,776 | 2016-01-08 ~ 2026-05-10 | 포지셔닝 |
 | `macro_panel/fred_daily_wide` | 16,402 | 1962-01-02 ~ 2026-05-01 | macro rates/indices |
-| `public_market_news` | 2,240 | 2026-01-11 ~ 2026-05-11 | Yahoo Finance RSS 340 + Google News RSS 1,900 |
-| `event_context_daily` | 1,080 | 2026-03-13 ~ 2026-05-11 | 아직 새 Google News 전체가 반영되지 않은 기존 LLM context |
+| `public_market_news` | 148,408 | 2016-11-01 ~ 2026-06-05 | Google News RSS backfill + Yahoo Finance RSS + public RSS |
+| `event_context_daily` | 45,188 | 2016-11-01 ~ 2026-05-08 | 13개 관련 심볼 daily context. CL=F 3,476행은 Google Generative LLM context + raw news-pool features, fallback 0건 |
 
 충분성 판단:
 
-- 1d 가격/수급/포지셔닝 데이터는 h30 운영 artifact와 7/14/30 표시 길이 실험을 시작하기에 충분합니다.
+- 1d 가격/수급/포지셔닝 데이터는 h30 운영 artifact와 고정 30일 경로, 1주/2주/한달 endpoint 표시를 운영하기에 충분합니다.
 - 30m/15m 데이터는 기간이 너무 짧아 deep model 일반화 평가에는 부족합니다.
-- 뉴스는 340건에서 2,240건으로 늘었지만 기간이 2026년 1월 이후라 장기 regime 학습에는 여전히 부족합니다.
-- `event_context_daily`는 아직 2,240건 뉴스 전체를 반영하지 못했습니다. LLM API 일일 500회 한도 때문에 cache/resume 방식으로 여러 날에 나눠 처리해야 합니다.
+- 뉴스와 LLM event context는 이제 1d CL=F 가격 panel의 대부분 기간과 겹치므로, GDELT만으로 막혀 있던 장기 regime context 부족은 완화됐습니다.
+- `event_context_daily`는 관련 심볼 전체의 local_rules context와 CL=F 외부 LLM context를 함께 보관합니다. CL=F 행은 새 API key와 cache/resume 재시도로 fallback 0건까지 재처리되었습니다. 재수집/재인코딩 시 quota가 다시 걸리면 실패 row만 같은 명령으로 재개합니다.
+- 2026-06-05에는 뉴스 압축 병목을 줄이기 위해 LLM이 직접 읽는 bounded 최신 뉴스 외에도 최근 1/3/7/30일 원시 뉴스 풀 전체에서 뉴스량, 선택 coverage, 상승/하락 압력, 에너지/지정학/거시/수급 압력, 소스 다양성 feature를 추가했습니다. 원시 뉴스 CSV의 14.8만 행은 에너지 심볼별 중복 복제 구조가 있으므로, CL=F/ALL에 연결되는 point-in-time 뉴스 풀을 기준으로 중복 가중을 피합니다.
 
 ## 아직 부족하거나 제한적인 데이터
 
 | 부족 데이터 | 영향 | 해결 방식 |
 | --- | --- | --- |
 | CME futures curve/settlement 장기 데이터 | term structure, roll yield, curve slope feature 부족 | CME DataMine/정산가 CSV를 확보해 `fetch_cme_settlements.py --manual-csv`로 적재 |
-| 더 긴 뉴스 history | `oil_context_fusion`이 장기 regime별 뉴스 반응을 충분히 학습하기 어려움 | GDELT rate limit을 피해 기간을 나눠 재수집하거나 licensed news CSV를 `NEWS_EVENTS_PATH`로 추가 |
+| Vendor-grade/licensed news와 더 넓은 event coverage | 공개 RSS backfill은 충분한 길이를 확보했지만 중복/검색 편향/본문 부족 가능성이 있음 | 사용자가 정식으로 받은 news/API export를 `NEWS_EVENTS_PATH` 또는 `data/external` ingest로 추가 |
 | 실측 calibration residual | quantile band를 검증된 confidence interval로 부를 수 없음 | rolling backtest 후 `scripts/evaluate/calibrate_quantiles.py` 실행 |
 | Intraday fundamental/event alignment | 1h 이하 interval에서 주간/일간 feature의 release timing 정밀도 부족 | `feature_available_at`을 실제 발표 시각 기준으로 보강 |
 | Vendor-grade market data | yfinance 결측/수정/지연 가능성 | Stooq, broker/vendor CSV, database provider를 추가 source로 저장 |
@@ -71,7 +72,7 @@ Provider 구현은 `market_ai/data/providers`에 있습니다.
 - `cftc_provider.py`: CFTC COT ZIP/CSV/manual CSV 정규화
 - `cme_provider.py`: CME settlement manual/URL CSV 정규화
 - `fred_provider.py`: FRED macro series 수집
-- `public_news_provider.py`: Yahoo RSS, Google News RSS, GDELT public news 수집
+- `public_news_provider.py`: Yahoo RSS, Google News RSS date-window backfill, generic public RSS, GDELT public news 수집
 
 Provider는 raw cache와 processed output을 분리합니다. 실패하면 status/warning을 기록하고 production에서 synthetic fallback을 만들지 않습니다.
 
@@ -135,9 +136,15 @@ Google Gemma/Gemini 같은 external LLM context:
 ```bash
 .venv/bin/python scripts/data/build_event_context.py \
   --news-path data/raw/news/public_market_news.csv \
-  --symbols CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F,DX-Y.NYB,EURUSD=X,USDKRW=X,JPY=X,SPY,QQQ,^GSPC,^VIX,XLE,USO \
+  --symbols CL=F \
   --mode google_generative \
-  --live
+  --live \
+  --start 2016-11-01 \
+  --end 2026-05-08 \
+  --news-limit-per-context 8 \
+  --llm-batch-size 1 \
+  --llm-min-interval-seconds 0.25 \
+  --progress-every 500
 ```
 
 LLM API 한도가 있는 경우 `llm_context_cache.jsonl`에 처리 결과가 행 단위로 즉시 append됩니다. 같은 명령을 다시 실행하면 `symbol/date/news_hash`가 같은 행은 cache hit로 건너뜁니다.
@@ -145,18 +152,20 @@ LLM API 한도가 있는 경우 `llm_context_cache.jsonl`에 처리 결과가 �
 ```bash
 .venv/bin/python scripts/data/build_event_context.py \
   --news-path data/raw/news/public_market_news.csv \
-  --symbols CL=F,BZ=F,NG=F,RB=F,HO=F,GC=F,SI=F,HG=F,DX-Y.NYB,EURUSD=X,USDKRW=X,JPY=X,SPY,QQQ,^GSPC,^VIX,XLE,USO \
+  --symbols CL=F \
   --mode google_generative \
   --live \
-  --start 2026-01-11 \
-  --end 2026-05-11 \
-  --news-limit-per-context 10 \
-  --llm-batch-size 10 \
-  --llm-min-interval-seconds 4.2 \
-  --progress-every 50
+  --start 2016-11-01 \
+  --end 2026-05-08 \
+  --news-limit-per-context 8 \
+  --llm-batch-size 1 \
+  --llm-min-interval-seconds 5.0 \
+  --progress-every 100000
 ```
 
-`--news-limit-per-context`는 한 `symbol/date` context에 넣는 최근 뉴스 개수입니다. `--llm-batch-size`는 여러 `symbol/date` context를 한 external LLM request로 묶는 개수입니다. `--llm-min-interval-seconds`는 RPM 한도를 넘기지 않기 위한 request 간 최소 대기 시간입니다. 새로 전부 다시 계산하고 싶을 때만 `--no-resume-cache`를 사용합니다.
+`--news-limit-per-context`는 한 `symbol/date` context에서 LLM이 직접 읽는 최근 뉴스 개수입니다. 현재 historical cache는 최근 7일 최신 8개 뉴스 기준으로 정리되어 있습니다. 이 값은 토큰 비용을 제어하기 위한 제한이며, builder는 이 제한과 별개로 최근 1/3/7/30일 원시 뉴스 풀 전체에서 14개 aggregate feature를 계산해 모델 입력 병목을 줄입니다. `--llm-batch-size`는 여러 `symbol/date` context를 한 external LLM request로 묶는 개수입니다. `--llm-min-interval-seconds`는 RPM 한도를 넘기지 않기 위한 request 간 최소 대기 시간입니다. 새로 전부 다시 계산하고 싶을 때만 `--no-resume-cache`를 사용합니다.
+
+외부 LLM 학습 context 빌드는 기본적으로 strict하게 운영합니다. `--live`와 외부 LLM 모드를 함께 쓰는 경우 fallback row가 나오면 빌드를 중단하고, cache를 유지한 채 실패 날짜만 재시도합니다. 개발 중 fallback 경로를 일부러 확인할 때만 `--allow-external-llm-fallback`을 사용합니다.
 
 ## Real Dataset Orchestration
 
@@ -172,7 +181,7 @@ LLM API 한도가 있는 경우 `llm_context_cache.jsonl`에 처리 결과가 �
   --skip-stooq-secondary
 ```
 
-GDELT는 rate limit이 있을 수 있으므로 실패가 나도 Yahoo RSS 기반 뉴스 수집은 계속됩니다.
+GDELT는 rate limit이 있을 수 있습니다. 이 경우에도 Yahoo RSS, Google News RSS backfill, generic public RSS 수집은 계속되며, production에서는 실패를 warning/status로 남기고 synthetic news를 만들지 않습니다.
 
 ## Deep Dataset
 
@@ -180,10 +189,10 @@ GDELT는 rate limit이 있을 수 있으므로 실패가 나도 Yahoo RSS 기반
 
 - `x_price`: log return, vol-scaled return, range, rolling volatility, momentum, drawdown, autocorr, trend, skew/kurtosis, cycle feature
 - `x_cross_asset`: related return/correlation/spread/relative strength/risk proxy/missing indicator
-- `x_event_context`: event/LLM context vector
+- `x_event_context`: 최근 뉴스가 128일 평균에 희석되지 않도록 recency-weighted event/LLM context vector. 현재 차원은 27개이며 LLM 13개 feature와 원시 뉴스 풀 aggregate 14개 feature로 구성됩니다.
 - `x_static`: current price, realized volatility, lookback, horizon
 
-Target은 `future cumulative log return / recent_realized_volatility`입니다. Raw future price를 직접 target으로 학습하지 않습니다.
+Target은 `future cumulative log return / recent_realized_volatility`이며 현재 학습 cap은 `[-36, 36]`입니다. Raw future price를 직접 target으로 학습하지 않고, forecast price는 `current_price * exp(predicted_cumulative_log_return_h)` 방식으로 복원합니다.
 
 ## Split과 No-Lookahead
 
