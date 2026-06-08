@@ -50,15 +50,87 @@ body {
 .header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
+  align-items: start;
   gap: 12px;
 }
 
 .header h1 {
   margin: 0;
-  font-size: clamp(24px, 2.55vw, 34px);
-  color: #f0f6fc;
+  min-width: 0;
+}
+
+.brand-logo-title {
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+}
+
+.brand-wordmark {
+  display: block;
+  width: clamp(176px, 13.5vw, 210px);
+  color: #edf3f8;
+  line-height: 1;
+}
+
+.brand-name {
+  display: block;
+  font-family: "Helvetica Neue", Arial, "Inter", "Segoe UI", sans-serif;
+  font-size: 44px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0;
   white-space: nowrap;
+  text-shadow: 0 1px 10px rgba(3, 7, 12, 0.24);
+}
+
+.brand-name-light {
+  color: #edf3f8;
+}
+
+.brand-letter {
+  display: inline-block;
+}
+
+.brand-name-oil {
+  color: var(--brand-oil-color, #7da7d9);
+  text-shadow: 0 1px 10px var(--brand-oil-glow, rgba(63, 116, 181, 0.24));
+  transition: color 0.2s ease, text-shadow 0.2s ease;
+}
+
+body[data-chart-mode="live"] {
+  --brand-oil-color: #58cfa8;
+  --brand-oil-glow: rgba(52, 211, 153, 0.22);
+}
+
+body[data-chart-mode="backtest"] {
+  --brand-oil-color: #d4bd73;
+  --brand-oil-glow: rgba(242, 204, 96, 0.18);
+}
+
+.brand-tagline {
+  display: block;
+  margin-top: -8.5px;
+  margin-left: 40px;
+  width: calc(100% - 40px);
+  height: 8.35px;
+  overflow: hidden;
+  padding-left: 0;
+  color: rgba(176, 187, 199, 0.96);
+  line-height: 0;
+  letter-spacing: 0;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(3, 7, 12, 0.36);
+}
+
+.brand-tagline-text {
+  display: inline-block;
+  font-family: "Helvetica Neue", Arial, "Inter", "Segoe UI", sans-serif;
+  font-size: 8.35px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.2px;
+  transform: none;
+  vertical-align: top;
 }
 
 .language-toggle {
@@ -141,6 +213,7 @@ body {
 .language-mode-toggle {
   grid-column: 3;
   justify-self: end;
+  align-self: start;
 }
 
 .controls label {
@@ -363,7 +436,7 @@ body {
   max-height: clamp(220px, 28vh, 320px);
   padding: 0;
   --chat-head-space: 72px;
-  --chat-form-space: 82px;
+  --chat-form-space: 86px;
 }
 
 .llm-chat-panel::before {
@@ -391,17 +464,19 @@ body {
 }
 
 .llm-chat-log {
-  position: relative;
+  position: absolute;
+  inset: 0;
   z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 9px;
-  height: 100%;
-  min-height: inherit;
-  max-height: inherit;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding: var(--chat-head-space) 0 var(--chat-form-space);
   margin: 0;
-  padding: var(--chat-head-space) 16px var(--chat-form-space);
+  padding: 0 16px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -410,6 +485,22 @@ body {
   -webkit-backdrop-filter: none;
   color: var(--muted);
   font-size: 12px;
+}
+
+.llm-chat-log::before,
+.llm-chat-log::after {
+  content: "";
+  display: block;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.llm-chat-log::before {
+  min-height: var(--chat-head-space);
+}
+
+.llm-chat-log::after {
+  min-height: var(--chat-form-space);
 }
 
 .llm-chat-log > p {
@@ -1777,9 +1868,10 @@ body {
   .dashboard-grid {
     grid-template-columns: minmax(520px, 1fr) minmax(240px, 320px) minmax(280px, 360px);
     flex: 1 1 auto;
-    min-height: 560px;
-    height: max(560px, calc(100vh - 118px));
-    height: max(560px, calc(100dvh - 118px));
+    min-height: min(560px, calc(100vh - 128px));
+    min-height: min(560px, calc(100dvh - 128px));
+    height: calc(100vh - 128px);
+    height: calc(100dvh - 128px);
   }
 
   .chart-column {
@@ -2006,8 +2098,12 @@ body {
     gap: 10px;
   }
 
-  .header h1 {
-    font-size: 28px;
+  .brand-wordmark {
+    width: clamp(200px, 28vw, 250px);
+  }
+
+  .brand-name {
+    font-size: 44px;
   }
 
   .controls {
@@ -2041,9 +2137,25 @@ body {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .header h1 {
-    min-width: 0;
-    white-space: normal;
+  .brand-wordmark {
+    width: clamp(170px, 50vw, 220px);
+  }
+
+  .brand-name {
+    font-size: 40px;
+  }
+
+  .brand-tagline {
+    margin-top: -7.8px;
+    margin-left: 36px;
+    width: calc(100% - 36px);
+    height: 7.7px;
+  }
+
+  .brand-tagline-text {
+    font-size: 7.7px;
+    font-weight: 900;
+    letter-spacing: -0.18px;
   }
 
   .language-mode-toggle {

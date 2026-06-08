@@ -74,7 +74,7 @@ def test_model_commentary_highlights_directional_keywords() -> None:
     script = (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
     styles = (FRONTEND_DIR / "src" / "dashboard.css").read_text(encoding="utf-8")
 
-    assert "20260608-chat-glass-context-dedupe" in index
+    assert "20260608-wordmark-guides-v20" in index
     assert "const COMMENTARY_KEYWORDS" in script
     assert "highlightCommentaryText(summary" in script
     assert "highlightCommentaryText(li" in script
@@ -196,6 +196,8 @@ def test_chat_panel_lives_under_chart_column() -> None:
     assert ".forecast-report-panel,\n.llm-chat-panel" in styles
     assert "backdrop-filter: blur(22px) saturate(150%);" in styles
     assert "max-height: clamp(220px, 28vh, 320px);" in styles
+    assert "--chat-head-space: 72px;" in styles
+    assert "--chat-form-space: 86px;" in styles
     assert "grid-template-rows: minmax(0, 2fr) minmax(260px, 1fr);" in styles
     assert "overflow-y: auto;" in styles
     assert "margin: 0 -16px 12px;" in styles
@@ -203,8 +205,14 @@ def test_chat_panel_lives_under_chart_column() -> None:
     assert "rgba(21, 27, 35, 0.4) 58%" in styles
     assert ".llm-chat-log" in styles
     assert "background: transparent;" in styles
-    assert "max-height: inherit;" in styles
-    assert "height: 100%;" in styles
+    assert "inset: 0;" in styles
+    assert "max-height: none;" in styles
+    assert "overscroll-behavior: contain;" in styles
+    assert "scroll-padding: var(--chat-head-space) 0 var(--chat-form-space);" in styles
+    assert "padding: 0 16px;" in styles
+    assert ".llm-chat-log::before,\n.llm-chat-log::after" in styles
+    assert "min-height: var(--chat-head-space);" in styles
+    assert "min-height: var(--chat-form-space);" in styles
     assert ".llm-chat-form" in styles
     chat_form_block = styles[
         styles.index(".llm-chat-form {") : styles.index(".llm-chat-form input")
@@ -213,13 +221,14 @@ def test_chat_panel_lives_under_chart_column() -> None:
     assert "backdrop-filter: blur(22px) saturate(165%);" in chat_form_block
     assert "background: transparent;" not in chat_form_block
     assert "backdrop-filter: none;" not in chat_form_block
-    assert "position: absolute;" in styles
-    assert "bottom: 0;" in styles
+    assert "position: absolute;" in chat_form_block
+    assert "bottom: 0;" in chat_form_block
     assert "margin: 0;" in styles
-    assert "padding: var(--chat-head-space) 16px var(--chat-form-space);" in styles
     assert "@keyframes chatTypingGrow" in styles
     assert ".llm-chat-message.user" in styles
     assert "align-self: flex-end;" in styles
+    assert "window.requestAnimationFrame(() => {" in script
+    assert "window.setTimeout(scroll, 0);" in script
 
 
 def test_backtest_metrics_panel_is_collapsed_in_live_mode() -> None:
@@ -232,7 +241,7 @@ def test_backtest_metrics_panel_is_collapsed_in_live_mode() -> None:
     assert "overflow: visible;" in styles
     assert "justify-content: center;" in styles
     assert ".chart-panel,\n  .insight-column" not in styles
-    assert "height: max(560px, calc(100dvh - 118px));" in styles
+    assert "height: calc(100dvh - 128px);" in styles
     assert "ResizeObserver" in (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
 
 
@@ -256,6 +265,51 @@ def test_chart_header_removes_nonessential_meta_badges() -> None:
     assert 'badge.dataset.tooltip = tooltip;' in script
     assert '.data-status-badge[data-tooltip]::after' in styles
     assert 'if (!["mock", "fallback", "error"].includes(status))' in script
+
+
+def test_header_title_uses_spoiler_text_wordmark() -> None:
+    index = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    styles = (FRONTEND_DIR / "src" / "dashboard.css").read_text(encoding="utf-8")
+
+    assert 'class="brand-logo-title"' in index
+    assert 'aria-label="Spoiler Oil Price Prediction Platform"' in index
+    assert '<body data-chart-mode="live">' in index
+    assert 'class="brand-wordmark"' in index
+    assert 'class="brand-letter brand-letter-p brand-name-light"' in index
+    assert 'class="brand-letter brand-letter-r brand-name-light"' in index
+    assert 'class="brand-name-oil"' in index
+    assert 'class="brand-tagline-text"' in index
+    assert "Oil Price Prediction Platform" in index
+    assert 'src="/static/assets/spoiler-logo.png' not in index
+    assert '<h1 data-i18n="appTitle">' not in index
+    assert ".brand-wordmark" in styles
+    assert ".brand-name-oil" in styles
+    assert "padding-left: 12px;" in styles
+    assert "width: clamp(176px, 13.5vw, 210px);" in styles
+    assert "align-items: start;" in styles
+    assert "align-self: start;" in styles
+    assert "margin-top: -8.5px;" in styles
+    assert "margin-left: 40px;" in styles
+    assert "width: calc(100% - 40px);" in styles
+    assert "height: 8.35px;" in styles
+    assert "overflow: hidden;" in styles
+    assert ".brand-tagline-text" in styles
+    assert "color: rgba(176, 187, 199, 0.96);" in styles
+    assert 'font-family: "Helvetica Neue", Arial, "Inter", "Segoe UI", sans-serif;' in styles
+    assert "font-size: 8.35px;" in styles
+    assert "font-weight: 900;" in styles
+    assert "letter-spacing: -0.2px;" in styles
+    assert "transform: none;" in styles
+    assert "vertical-align: top;" in styles
+    assert 'font-family: "Helvetica Neue", Arial, "Inter", "Segoe UI", sans-serif;' in styles
+    assert "font-weight: 900;" in styles
+    assert "line-height: 1.2;" in styles
+    assert "body[data-chart-mode=\"live\"]" in styles
+    assert "--brand-oil-color: #58cfa8;" in styles
+    assert "body[data-chart-mode=\"backtest\"]" in styles
+    assert "--brand-oil-color: #d4bd73;" in styles
+    assert "document.body.dataset.chartMode = displayMode;" in (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
+    assert "-webkit-text-stroke" not in styles
 
 
 def test_loading_state_uses_chart_updated_slot() -> None:
@@ -360,7 +414,7 @@ def test_dashboard_panels_use_single_combined_llm_request() -> None:
     assert "renderContextMarkers(null);" in script
     assert "dashboardPanelKey(" in script
     assert "originTime," in script
-    assert "chat-glass-context-dedupe" in index
+    assert "20260608-wordmark-guides-v20" in index
 
 
 def test_vertical_side_panels_scroll_internally() -> None:

@@ -4,12 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Oil Price Forecast Dashboard</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20260608-chat-glass-context-dedupe" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=20260608-wordmark-guides-v20" />
   </head>
-  <body>
+  <body data-chart-mode="live">
     <main class="wrap">
       <section class="header">
-        <h1 data-i18n="appTitle">유가 예측 대시보드</h1>
+        <h1 class="brand-logo-title" aria-label="Spoiler Oil Price Prediction Platform">
+          <span class="brand-wordmark" aria-hidden="true">
+            <span class="brand-name"><span class="brand-letter brand-letter-s brand-name-light">S</span><span class="brand-letter brand-letter-p brand-name-light">p</span><span class="brand-name-oil">oil</span><span class="brand-letter brand-letter-e brand-name-light">e</span><span class="brand-letter brand-letter-r brand-name-light">r</span></span>
+            <span class="brand-tagline"><span class="brand-tagline-text">Oil Price Prediction Platform</span></span>
+          </span>
+        </h1>
         <label class="language-toggle language-mode-toggle" aria-label="Language">
           <span>KO</span>
           <input id="language-toggle" type="checkbox" role="switch" aria-label="Language" />
@@ -144,6 +149,6 @@
     </main>
 
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="/static/main.js?v=20260608-chat-glass-context-dedupe"></script>
+    <script src="/static/main.js?v=20260608-mode-wordmark"></script>
   </body>
 </html>
