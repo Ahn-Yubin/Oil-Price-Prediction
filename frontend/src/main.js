@@ -1721,7 +1721,14 @@ function userFacingLlmError(message = "") {
 
 function scrollChatLogToEnd(log = document.getElementById("llm-chat-log")) {
   if (!log) return;
-  log.scrollTop = log.scrollHeight;
+  const scroll = () => {
+    log.scrollTop = log.scrollHeight;
+  };
+  scroll();
+  window.requestAnimationFrame(() => {
+    scroll();
+    window.setTimeout(scroll, 0);
+  });
 }
 
 function appendChatMessage(role, text, warnings = []) {
@@ -2038,11 +2045,13 @@ function updateBacktestControls() {
   }
   if (modeToggle) {
     const isLiveMode = chartMode !== "backtest";
+    const displayMode = isLiveMode ? "live" : "backtest";
     modeToggle.checked = isLiveMode;
     modeToggle.setAttribute("aria-checked", modeToggle.checked ? "true" : "false");
     const shell = modeToggle.closest(".chart-mode-toggle");
     shell?.setAttribute("data-disabled", "false");
-    chartPanel?.setAttribute("data-mode", isLiveMode ? "live" : "backtest");
+    chartPanel?.setAttribute("data-mode", displayMode);
+    document.body.dataset.chartMode = displayMode;
   }
   if (chartMode === "backtest" && !activeBacktestPayload && !loadingState.backtest) {
     if (status?.dataset.severity !== "error") {
