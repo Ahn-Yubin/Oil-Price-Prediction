@@ -5,12 +5,25 @@ import numpy as np
 import pandas as pd
 
 from market_ai.config import get_settings
+from market_ai.forecasting import scenarios as scenario_service
 from market_ai.forecasting import service
 from market_ai.modeling.deep.availability import DeepArtifactAvailability
 from market_ai.modeling.forecasters.deep_fusion import DeepModelUnavailable
 from market_ai.modeling.forecasters.neural_npz import PretrainedModelNotFoundError
 from market_ai.modeling.model_catalog import DEEP_MODELS
-from market_ai.schemas.market import AssetClass, Candle, DataStatus, MarketDataWindow, MarketSymbol, Timeframe
+from market_ai.schemas.llm_context import LLMContextOutput, StructuredEvent
+from market_ai.schemas.market import (
+    AssetClass,
+    AssetMetadata,
+    Candle,
+    DataStatus,
+    ForecastPoint,
+    ForecastResponse,
+    MarketDataWindow,
+    MarketSymbol,
+    ScenarioEventInput,
+    Timeframe,
+)
 
 
 def _market_window(rows: int = 90) -> MarketDataWindow:
@@ -91,6 +104,252 @@ def _oil_model(**kwargs):
         "color": "#fff",
         "values": values,
     }
+
+
+def _oil_model_with_metadata(**kwargs):
+    model = _oil_model(**kwargs)
+    model["metadata"] = {
+        "model_name": "oil_context_fusion",
+        "feature_set": "deep_price_v1",
+        "target": "volatility_scaled_cumulative_log_return_distribution",
+        "training_cutoff": "2025-12-31T00:00:00+00:00",
+        "metrics": {
+            "validation_mae": 4.2,
+            "validation_rmse": 5.3,
+            "validation_mape": 6.4,
+        },
+    }
+    return model
+
+
+def test_scenario_forecast_builds_context_override_from_llm_event(monkeypatch):
+    market = _market_window()
+    captured = {"event_context_frames": [], "adapter_flags": []}
+
+    class FakeScenarioEncoder:
+        def encode_events(self, context):
+            captured["context"] = context
+            return LLMContextOutput(
+                events=[
+                    StructuredEvent(
+                        event_type="geopolitical_supply_shock",
+                        affected_assets=["CL=F"],
+                        directional_bias="bullish",
+                        impact_strength=0.9,
+                        uncertainty=0.35,
+                        time_decay=0.85,
+                        summary="Iran blockade creates oil supply disruption risk",
+                        risk_factors=["Hormuz shipping disruption"],
+                    )
+                ],
+                overall_bias="bullish",
+                impact_score=0.9,
+                uncertainty=0.35,
+                event_embedding=[1.0, 0.9, 0.35, 0.85, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.8],
+                explanation="Structured scenario context only.",
+                warnings=[],
+            )
+
+    def fake_build_forecast(**kwargs):
+        captured["event_context_frames"].append(kwargs["event_context_frame_override"])
+        captured["adapter_flags"].append(kwargs.get("apply_event_path_adapter"))
+        horizon = int(kwargs.get("horizon") or 3)
+        forecast = [
+            ForecastPoint(
+                time=market.candles[-1].time + (idx + 1) * 86_400,
+                p05=82.0 + idx,
+                p10=83.0 + idx,
+                p25=84.0 + idx,
+                p50=88.0 + idx,
+                p75=89.0 + idx,
+                p90=90.0 + idx,
+                p95=91.0 + idx,
+                expected_return=0.03,
+                expected_volatility=0.04,
+                prob_up=0.7,
+                confidence=0.6,
+            )
+            for idx in range(horizon)
+        ]
+        response = ForecastResponse(
+            symbol="CL=F",
+            asset_metadata=AssetMetadata(symbol="CL=F", provider_symbol="CL=F", asset_class=AssetClass.futures),
+            interval="1d",
+            generated_at=datetime.now(timezone.utc),
+            current_price=85.0,
+            data_status=market.data_status,
+            forecast=forecast,
+            primary_model="oil_context_fusion",
+        )
+        return service.ForecastBundle(
+            response=response,
+            market_data=market,
+            forecast_models=[
+                {
+                    "id": "oil_context_fusion",
+                    "points": [{"time": market.candles[-1].time, "value": 85.0}]
+                    + [{"time": point.time, "value": point.p50} for point in forecast],
+                }
+            ],
+            metrics={},
+            model_info={},
+            horizon=horizon,
+        )
+
+    monkeypatch.setattr(scenario_service, "load_market_data_window", lambda *args, **kwargs: market)
+    monkeypatch.setattr(scenario_service, "encoder_for_mode", lambda *args, **kwargs: FakeScenarioEncoder())
+    monkeypatch.setattr(scenario_service, "build_forecast", fake_build_forecast)
+
+    origin = datetime.fromtimestamp(market.candles[-1].time, tz=timezone.utc)
+    response = scenario_service.build_scenario_forecast(
+        title="이란 침공",
+        content="모레 트럼프가 이란을 다시 침공하면 유가 동향은?",
+        event_time=origin + pd.Timedelta(days=2),
+        symbol="CL=F",
+        interval="1d",
+        horizon=3,
+        settings=get_settings().model_copy(
+            update={
+                "enable_llm_context": True,
+                "enable_external_llm_calls": True,
+                "llm_api_key": "unit-key",
+                "llm_context_mode": "google_generative",
+            }
+        ),
+    )
+
+    rows = [frame.iloc[0] for frame in captured["event_context_frames"]]
+    assert response.points[-1].value == 90.0
+    assert any(row.get("raw_geopolitical_pressure", 0.0) >= 0.5 for row in rows)
+    assert any(row.get("raw_supply_pressure", 0.0) >= 0.5 for row in rows)
+    assert all(flag is False for flag in captured["adapter_flags"])
+    assert all(row["feature_available_at"] == pd.Timestamp(market.candles[-1].time, unit="s", tz="UTC").isoformat() for row in rows)
+    assert "Do not output oil price targets" in captured["context"].news[0].text
+    assert response.llm_context_summary["model_context_schedule"]["output_postprocessing"] is False
+    assert "target_price" not in str(response.model_dump()).lower()
+
+
+def test_scenario_forecast_uses_horizon_event_context_schedule(monkeypatch):
+    market = _market_window()
+    captured = {"frames": [], "adapter_flags": []}
+
+    class NeutralScenarioEncoder:
+        def encode_events(self, context):
+            return LLMContextOutput(
+                events=[],
+                overall_bias="unknown",
+                impact_score=0.1,
+                uncertainty=0.3,
+                event_embedding=[0.0] * 13,
+                explanation="Structured context only.",
+                warnings=[],
+            )
+
+    def fake_build_forecast(**kwargs):
+        frame = kwargs["event_context_frame_override"]
+        captured["frames"].append(frame.copy())
+        captured["adapter_flags"].append(kwargs.get("apply_event_path_adapter"))
+        row = frame.iloc[0]
+        net = float(row.get("raw_net_pressure", 0.0) or 0.0)
+        bearish = float(row.get("raw_bearish_pressure", 0.0) or 0.0)
+        bullish = float(row.get("raw_bullish_pressure", 0.0) or 0.0)
+        current = 85.0
+        horizon = 30
+        if bearish > 0.25 and bullish > 0.25:
+            multiplier = 0.99
+        elif net > 0.25:
+            multiplier = 1.08
+        elif net < -0.25:
+            multiplier = 0.94
+        else:
+            multiplier = 1.0
+        forecast = [
+            ForecastPoint(
+                time=market.candles[-1].time + (idx + 1) * 86_400,
+                p05=current * multiplier * 0.95,
+                p10=current * multiplier * 0.96,
+                p25=current * multiplier * 0.98,
+                p50=current * multiplier,
+                p75=current * multiplier * 1.02,
+                p90=current * multiplier * 1.04,
+                p95=current * multiplier * 1.05,
+                expected_return=float(np.log(multiplier)),
+                expected_volatility=0.02,
+                prob_up=0.7 if multiplier > 1.0 else 0.3 if multiplier < 1.0 else 0.5,
+                confidence=0.5,
+            )
+            for idx in range(horizon)
+        ]
+        response = ForecastResponse(
+            symbol="CL=F",
+            asset_metadata=AssetMetadata(symbol="CL=F", provider_symbol="CL=F", asset_class=AssetClass.futures),
+            interval="1d",
+            generated_at=datetime.now(timezone.utc),
+            current_price=current,
+            data_status=market.data_status,
+            forecast=forecast,
+            primary_model="oil_context_fusion",
+        )
+        return service.ForecastBundle(
+            response=response,
+            market_data=market,
+            forecast_models=[
+                {
+                    "id": "oil_context_fusion",
+                    "points": [{"time": market.candles[-1].time, "value": current}]
+                    + [{"time": point.time, "value": current} for point in forecast],
+                }
+            ],
+            metrics={},
+            model_info={},
+            horizon=horizon,
+        )
+
+    monkeypatch.setattr(scenario_service, "load_market_data_window", lambda *args, **kwargs: market)
+    monkeypatch.setattr(scenario_service, "encoder_for_mode", lambda *args, **kwargs: NeutralScenarioEncoder())
+    monkeypatch.setattr(scenario_service, "build_forecast", fake_build_forecast)
+
+    origin = datetime.fromtimestamp(market.candles[-1].time, tz=timezone.utc)
+    response = scenario_service.build_scenario_forecast(
+        title="혼합 시나리오",
+        content="상방 공급 차질 이후 증산 뉴스가 나온다.",
+        events=[
+            ScenarioEventInput(
+                title="호르무즈 해협 재봉쇄",
+                content="미국의 이란 제재와 호르무즈 해협 봉쇄로 공급 차질 우려가 커진다.",
+                event_time=origin + pd.Timedelta(days=9),
+            ),
+            ScenarioEventInput(
+                title="OPEC 증산",
+                content="OPEC이 일일 석유 생산량을 크게 증산한다.",
+                event_time=origin + pd.Timedelta(days=20),
+            ),
+        ],
+        symbol="CL=F",
+        interval="1d",
+        settings=get_settings().model_copy(
+            update={
+                "enable_llm_context": True,
+                "enable_external_llm_calls": True,
+                "llm_api_key": "unit-key",
+                "llm_context_mode": "google_generative",
+            }
+        ),
+    )
+
+    values = np.asarray([point.value for point in response.points], dtype=np.float64)
+    assert response.llm_context_summary["overall_bias"] == "mixed"
+    schedule = response.llm_context_summary["model_context_schedule"]
+    assert schedule["mode"] == "horizon_event_context_schedule"
+    assert schedule["output_postprocessing"] is False
+    assert schedule["model_calls"] >= 3
+    assert "scheduled_event_adjustment" not in response.llm_context_summary
+    assert all(flag is False for flag in captured["adapter_flags"])
+    assert any(float(frame.iloc[0].get("raw_net_pressure", 0.0) or 0.0) > 0.25 for frame in captured["frames"])
+    assert any(float(frame.iloc[0].get("raw_bearish_pressure", 0.0) or 0.0) > 0.25 for frame in captured["frames"])
+    assert values[12] > values[0] * 1.05
+    assert values[24] < np.max(values[10:19]) * 0.98
+    assert "target_price" not in str(response.model_dump()).lower()
 
 
 def _turn_count(values: np.ndarray) -> int:
@@ -347,6 +606,20 @@ def test_forecast_models_query_selects_requested_model(monkeypatch):
     assert bundle.response.selected_models == ["oil_context_fusion"]
     assert bundle.response.primary_model == "oil_context_fusion"
     assert [model["id"] for model in bundle.forecast_models] == ["oil_context_fusion"]
+
+
+def test_selected_deep_model_metrics_do_not_use_internal_pattern_label(monkeypatch):
+    monkeypatch.setattr(service, "load_market_data_window", lambda *args, **kwargs: _market_window())
+    monkeypatch.setattr(service, "forecast_model_comparison", _comparison)
+    monkeypatch.setattr(service, "_deep_availability_by_model", _available_deep_availability)
+    monkeypatch.setattr(service, "forecast_with_deep_model", _oil_model_with_metadata)
+    bundle = service.build_forecast(symbol="CL=F", interval="1d", models="oil_context_fusion", include_scenarios=False)
+
+    assert bundle.response.primary_model == "oil_context_fusion"
+    assert bundle.metrics["model"] == "Oil Context Fusion"
+    assert bundle.metrics["model_id"] == "oil_context_fusion"
+    assert bundle.metrics["mape"] == 6.4
+    assert bundle.metrics["target_mode"] == "volatility_scaled_cumulative_log_return_distribution"
 
 
 def test_forecast_deep_request_falls_back_when_artifact_missing(monkeypatch):

@@ -74,7 +74,7 @@ def test_model_commentary_highlights_directional_keywords() -> None:
     script = (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
     styles = (FRONTEND_DIR / "src" / "dashboard.css").read_text(encoding="utf-8")
 
-    assert "20260608-wordmark-guides-v20" in index
+    assert "20260612-toggle-labels-v1" in index
     assert "const COMMENTARY_KEYWORDS" in script
     assert "highlightCommentaryText(summary" in script
     assert "highlightCommentaryText(li" in script
@@ -104,7 +104,12 @@ def test_chart_language_updates_dates_and_mode_styles() -> None:
     assert "candleSeriesRef.applyOptions({ title: \"\" });" in script
     assert "backtestActualSeriesRef.applyOptions({ title: \"\" });" in script
     assert "toLocaleString" not in script
-    assert ".chart-mode-toggle:has(input:checked)" in styles
+    assert ".chart-mode-segmented" in styles
+    assert 'data-chart-mode-option="scenario"' in (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    assert "language-toggle chart-mode-toggle chart-mode-segmented" in (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    assert "class=\"language-slider\"" in (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    assert "width: 66px;" in styles
+    assert "--mode-knob-x: 40px;" in styles
     assert "--live: #34d399;" in styles
     assert "--backtest: #f2cc60;" in styles
 
@@ -136,9 +141,38 @@ def test_backtest_mode_waits_for_chart_click_with_guide_copy() -> None:
     assert 'let chartMode = "live";' in script
     assert "backtestClickGuide" in script
     assert 'chartMode = "backtest";' in script
-    assert 'requestVersion += 1;\n    chartMode = "backtest";' in script
+    assert 'const nextMode = button.dataset.chartModeOption || "live";' in script
+    assert 'if (nextMode === "scenario")' in script
+    assert "function enterBacktestMode()" in script
+    assert "function enterLiveMode()" in script
+    assert "const waitingForInitialChart = !hasBasePayload && (chartRequestInFlight || loadingState.chart);" in script
+    assert "void initDashboard(currentOilSymbol(), currentInterval(), { force: true });" in script
+    enter_backtest_body = script.split("function enterBacktestMode()", 1)[1].split("function exitBacktestMode()", 1)[0]
+    assert "requestVersion += 1;" not in enter_backtest_body
+    assert "activeBacktestPayload = null;\n  activeBacktestOriginMarker = null;\n  selectedBacktestTime = null;" not in script
     assert 'setBacktestStatus(t("backtestClickGuide"), "guide");' in script
     assert '#backtest-status[data-severity="guide"]' in styles
+
+
+def test_backtest_origin_url_param_opens_backtest_without_preserving_live_range() -> None:
+    script = (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
+
+    assert "function initialBacktestOriginFromUrl()" in script
+    assert 'params.get("backtest_origin") || params.get("origin_time")' in script
+    assert "await runInitialBacktestFromUrl();" in script
+    assert "await runSelectedBacktest({ preserveRange: false });" in script
+    assert "renderBacktestChart(payload, savedRange, { resetView: !preserveRange });" in script
+
+
+def test_backtest_status_shows_post_cutoff_scope() -> None:
+    script = (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
+    styles = (FRONTEND_DIR / "src" / "dashboard.css").read_text(encoding="utf-8")
+
+    assert "function backtestScopeStatus(payload)" in script
+    assert 'status === "post_artifact_cutoff"' in script
+    assert 'status === "overlaps_artifact_sample_window"' in script
+    assert '`${actualText} · ${scope.label}`' in script
+    assert '#backtest-status[data-severity="warning"]' in styles
 
 
 def test_glass_panels_use_sticky_headers_and_stack_metrics_before_overlap() -> None:
@@ -396,7 +430,7 @@ def test_news_context_hides_internal_placeholder_text() -> None:
     assert "news-popover-factors" not in styles
 
 
-def test_dashboard_panels_use_single_combined_llm_request() -> None:
+def test_dashboard_panels_use_shared_dashboard_analysis_endpoint() -> None:
     script = (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
     index = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
 
@@ -414,7 +448,51 @@ def test_dashboard_panels_use_single_combined_llm_request() -> None:
     assert "renderContextMarkers(null);" in script
     assert "dashboardPanelKey(" in script
     assert "originTime," in script
-    assert "20260608-wordmark-guides-v20" in index
+    assert "20260612-toggle-labels-v1" in index
+
+
+def test_scenario_mode_adds_list_panel_and_forecast_endpoint() -> None:
+    index = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    script = (FRONTEND_DIR / "src" / "main.js").read_text(encoding="utf-8")
+    styles = (FRONTEND_DIR / "src" / "dashboard.css").read_text(encoding="utf-8")
+
+    assert 'data-chart-mode-option="scenario"' in index
+    assert 'id="scenario-panel"' in index
+    assert 'id="scenario-workspace"' in index
+    assert 'id="scenario-popover"' in index
+    assert 'addScenario.id = "scenario-add-button"' in script
+    assert 'contentInput.id = "scenario-content-input"' in script
+    assert 'timeInput.id = "scenario-event-time-input"' in script
+    assert "/api/scenarios/forecast" in script
+    assert "function activeScenarioModels()" in script
+    assert "renderScenarioOverlays" in script
+    assert "function forecastScenarioItem(item)" in script
+    assert "function selectScenarioEventTimeFromChart(time)" in script
+    assert "function updateScenarioEvent(" in script
+    assert "function positionScenarioEventTokens()" in script
+    assert "function scenarioIdFromCrosshair(param)" in script
+    assert "function bindScenarioHighlight(node, getId)" in script
+    assert 'node.addEventListener("pointerenter", show);' in script
+    assert 'node.addEventListener("focusin", show);' in script
+    assert "item.tabIndex = 0;" in script
+    assert "chartCoordinateForUnix(ts)" in script
+    assert "setHighlightedScenario(scenarioIdFromCrosshair(param));" in script
+    assert "클릭해서 이벤트를 추가하세요" in script
+    assert "event-edit" in script
+    assert 'chartMode === "scenario"' in script
+    assert 'body[data-chart-mode="scenario"]' in styles
+    assert ".scenario-panel" in styles
+    assert ".scenario-workspace-split" in styles
+    assert ".scenario-chart-legend" in styles
+    assert ".scenario-time-wheel" in styles
+    assert ".scenario-toggle-track" in styles
+    assert ".scenario-icon-button" in styles
+    assert ".scenario-inline-add" in styles and "width: 100%;" in styles
+    assert ".scenario-event-action-button" in styles and "backdrop-filter: none;" in styles
+    scenario_service = (FRONTEND_DIR.parent / "market_ai" / "forecasting" / "scenarios.py").read_text(encoding="utf-8")
+    assert "model_context_schedule" in scenario_service
+    assert "apply_event_path_adapter=False" in scenario_service
+    assert "#c084fc" in styles
 
 
 def test_vertical_side_panels_scroll_internally() -> None:
@@ -423,3 +501,5 @@ def test_vertical_side_panels_scroll_internally() -> None:
     assert "@media (max-width: 1179px), (max-width: 1519px) and (orientation: portrait)" in styles
     assert "max-height: clamp(300px, 38vh, 480px);" in styles
     assert "overflow-y: auto;" in styles
+    assert "flex: 1 1 0;" in styles
+    assert "min-height: 260px;" in styles

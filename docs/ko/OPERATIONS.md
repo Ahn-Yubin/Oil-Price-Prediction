@@ -64,6 +64,7 @@ export LLM_CONTEXT_MODE=google_generative
 export LLM_API_KEY="YOUR_GOOGLE_API_KEY"
 export LLM_API_BASE="https://generativelanguage.googleapis.com/v1beta"
 export LLM_MODEL="gemma-3-27b-it"
+export LLM_REQUEST_TIMEOUT_SECONDS=45
 ```
 
 Dry-run:

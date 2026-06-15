@@ -11,6 +11,7 @@ def test_settings_defaults_are_portable():
     assert settings.model_dir == PROJECT_DIR / "artifacts" / "models"
     assert settings.metadata_dir == PROJECT_DIR / "artifacts" / "metadata"
     assert settings.mock_data_enabled is True
+    assert settings.llm_request_timeout_seconds == 45.0
 
 
 def test_settings_env_override(tmp_path: Path):
@@ -24,6 +25,7 @@ def test_settings_env_override(tmp_path: Path):
             "DEFAULT_INTERVAL": "1h",
             "DATA_STALE_THRESHOLD_SECONDS": "60",
             "ENABLE_LLM_CONTEXT": "true",
+            "LLM_REQUEST_TIMEOUT_SECONDS": "90",
         }
     )
     assert settings.app_env == "production"
@@ -34,3 +36,4 @@ def test_settings_env_override(tmp_path: Path):
     assert settings.default_interval == "1h"
     assert settings.data_stale_threshold_seconds == 60
     assert settings.enable_llm_context is True
+    assert settings.llm_request_timeout_seconds == 90.0

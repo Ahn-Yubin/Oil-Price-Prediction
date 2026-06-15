@@ -82,13 +82,22 @@ def _future_datetimes(last_time: int, interval: str, horizon: int) -> list[datet
     return [start + step * (i + 1) for i in range(horizon)]
 
 
-def _model_metrics(model_info: dict[str, Any], symbol: str) -> dict[str, Any]:
-    return {
+def _model_metrics(
+    model_info: dict[str, Any],
+    symbol: str,
+    *,
+    primary_model: dict[str, Any] | None = None,
+    deep_model_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    model_id = str(primary_model.get("id")) if primary_model and primary_model.get("id") else None
+    model_label = primary_model.get("label") if primary_model else None
+    metrics = {
         "mae": model_info.get("val_mae_ret"),
         "rmse": model_info.get("val_rmse_ret"),
         "mape": model_info.get("val_mape_pct"),
         "symbol": symbol,
-        "model": model_info.get("model_name", "Global DL model"),
+        "model": model_label or model_info.get("model_name", "Global DL model"),
+        "model_id": model_id,
         "band_calibration": model_info.get("band_calibration"),
         "band_scale": model_info.get("band_scale"),
         "feature_version": model_info.get("feature_version"),
@@ -97,6 +106,22 @@ def _model_metrics(model_info: dict[str, Any], symbol: str) -> dict[str, Any]:
         "pattern_engine": model_info.get("pattern_engine"),
         "motif_matches": model_info.get("motif_matches"),
     }
+    primary_deep_info = (deep_model_info or {}).get(model_id or "", {}) if model_id else {}
+    primary_metadata = primary_deep_info.get("metadata", {}) if isinstance(primary_deep_info, dict) else {}
+    primary_metrics = primary_metadata.get("metrics", {}) if isinstance(primary_metadata, dict) else {}
+    if isinstance(primary_metrics, dict) and primary_metrics:
+        metrics.update(
+            {
+                "mae": primary_metrics.get("validation_mae", metrics.get("mae")),
+                "rmse": primary_metrics.get("validation_rmse", metrics.get("rmse")),
+                "mape": primary_metrics.get("validation_mape", metrics.get("mape")),
+                "model": model_label or primary_metadata.get("model_name") or metrics.get("model"),
+                "feature_version": primary_metadata.get("feature_set") or metrics.get("feature_version"),
+                "target_mode": primary_metadata.get("target") or metrics.get("target_mode"),
+                "training_cutoff": primary_metadata.get("training_cutoff") or primary_metadata.get("train_end"),
+            }
+        )
+    return metrics
 
 
 def _quantile_points(
@@ -771,6 +796,9 @@ def build_forecast(
     allow_removed_models_as_warning: bool = False,
     settings: Settings | None = None,
     market_override: MarketDataWindow | None = None,
+    event_context_frame_override: pd.DataFrame | None = None,
+    llm_context_summary_override: dict[str, Any] | None = None,
+    apply_event_path_adapter: bool = True,
 ) -> ForecastBundle:
     del include_explanation
     settings = settings or get_settings()
@@ -856,8 +884,8 @@ def build_forecast(
     }
     deep_model_info: dict[str, Any] = {}
     live_context: dict[str, Any] | None = None
-    live_event_context_frame: pd.DataFrame | None = None
-    use_live_event_context = market_override is None
+    live_event_context_frame: pd.DataFrame | None = event_context_frame_override
+    use_live_event_context = market_override is None and event_context_frame_override is None
     if use_live_event_context and any(model_name in {"oil_context_fusion", "llm_context_seq_moe"} for model_name in selection.selected):
         try:
             live_context = build_live_event_context(
@@ -899,7 +927,7 @@ def build_forecast(
     for item in comparison_models:
         model_by_id[str(item.get("id"))] = item
     oil_model = model_by_id.get("oil_context_fusion")
-    if oil_model is not None:
+    if oil_model is not None and apply_event_path_adapter:
         pattern_model = model_by_id.get("pattern_mlp")
         adapted_values, adapter_info = _event_regime_path_adapter(
             close=close,
@@ -1051,6 +1079,25 @@ def build_forecast(
             severity="warning",
             message=cross_asset_context["warning"],
         )
+    llm_context_summary = {
+        "enabled": settings.enable_llm_context,
+        "external_calls_enabled": settings.enable_external_llm_calls,
+        "role": "context/event encoder only",
+        "event_context_source": (
+            live_context.get("source")
+            if live_context
+            else "scenario_override"
+            if event_context_frame_override is not None
+            else "processed_or_file"
+        ),
+        "live_news_count": int(len(live_context.get("news"))) if live_context is not None and live_context.get("news") is not None else 0,
+        "event_count": int((live_context.get("context_points") or [{}])[0].get("event_count", 0)) if live_context else 0,
+        "overall_bias": (live_context.get("context_points") or [{}])[0].get("overall_bias") if live_context else None,
+        "impact_score": (live_context.get("context_points") or [{}])[0].get("impact_score") if live_context else None,
+    }
+    if llm_context_summary_override:
+        llm_context_summary.update(llm_context_summary_override)
+
     response = ForecastResponse(
         symbol=market.symbol.provider_symbol,
         asset_metadata=metadata,
@@ -1073,16 +1120,7 @@ def build_forecast(
         primary_model=str(primary.get("id")),
         deprecated_models_requested=selection.deprecated_requested,
         removed_models_requested=selection.removed_requested,
-        llm_context_summary={
-            "enabled": settings.enable_llm_context,
-            "external_calls_enabled": settings.enable_external_llm_calls,
-            "role": "context/event encoder only",
-            "event_context_source": live_context.get("source") if live_context else "processed_or_file",
-            "live_news_count": int(len(live_context.get("news"))) if live_context is not None and live_context.get("news") is not None else 0,
-            "event_count": int((live_context.get("context_points") or [{}])[0].get("event_count", 0)) if live_context else 0,
-            "overall_bias": (live_context.get("context_points") or [{}])[0].get("overall_bias") if live_context else None,
-            "impact_score": (live_context.get("context_points") or [{}])[0].get("impact_score") if live_context else None,
-        },
+        llm_context_summary=llm_context_summary,
         deep_model_info=deep_model_info,
         feature_version=model_info.get("feature_version") or model_info.get("feature_set"),
         artifact_status=artifact_status,
@@ -1093,7 +1131,12 @@ def build_forecast(
         response=response,
         market_data=market,
         forecast_models=forecast_models,
-        metrics=_model_metrics(model_info, market.symbol.provider_symbol),
+        metrics=_model_metrics(
+            model_info,
+            market.symbol.provider_symbol,
+            primary_model=primary,
+            deep_model_info=deep_model_info,
+        ),
         model_info=model_info,
         horizon=output_horizon,
     )

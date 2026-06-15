@@ -67,6 +67,7 @@ export LLM_CONTEXT_MODE=google_generative
 export LLM_API_KEY="YOUR_GOOGLE_API_KEY"
 export LLM_API_BASE="https://generativelanguage.googleapis.com/v1beta"
 export LLM_MODEL="gemma-3-27b-it"
+export LLM_REQUEST_TIMEOUT_SECONDS=45
 ```
 
 `export` only persists in the current shell. It disappears when the terminal closes. Use `.env` for project-specific persistent settings. The main server/script entrypoints now auto-load the project-root `.env`.
@@ -85,6 +86,7 @@ print("enable_llm_context:", s.enable_llm_context)
 print("enable_external_llm_calls:", s.enable_external_llm_calls)
 print("llm_model:", s.llm_model)
 print("llm_api_base:", s.llm_api_base)
+print("llm_request_timeout_seconds:", s.llm_request_timeout_seconds)
 print("llm_api_key_set:", bool(s.llm_api_key))
 PY
 ```

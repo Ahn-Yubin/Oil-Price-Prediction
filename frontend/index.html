@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Oil Price Forecast Dashboard</title>
-    <link rel="stylesheet" href="/static/dashboard.css?v=20260608-wordmark-guides-v20" />
+    <link rel="stylesheet" href="/static/dashboard.css?v=20260612-toggle-labels-v1" />
   </head>
   <body data-chart-mode="live">
     <main class="wrap">
@@ -34,12 +34,18 @@
           <section class="chart-panel">
             <div class="chart-panel-head">
               <div class="chart-mode-control">
-                <label class="language-toggle chart-mode-toggle" aria-label="Chart mode">
-                  <span data-i18n="backtest">백테스트</span>
-                  <input id="backtest-mode-toggle" type="checkbox" role="switch" aria-label="Chart mode" checked />
+                <div class="language-toggle chart-mode-toggle chart-mode-segmented" role="tablist" aria-label="Chart mode">
+                  <button type="button" data-chart-mode-option="backtest">
+                    <span data-i18n="backtest">백테스트</span>
+                  </button>
                   <span class="language-slider" aria-hidden="true"></span>
-                  <span data-i18n="live">라이브</span>
-                </label>
+                  <button type="button" data-chart-mode-option="live">
+                    <span data-i18n="live">라이브</span>
+                  </button>
+                  <button type="button" data-chart-mode-option="scenario">
+                    <span data-i18n="scenario">시나리오</span>
+                  </button>
+                </div>
                 <span id="backtest-status" data-severity="info"></span>
               </div>
               <div class="chart-meta">
@@ -52,6 +58,8 @@
               <div id="oilChart"></div>
               <div id="chart-data-warning" class="chart-data-warning hidden"></div>
               <div id="forecast-segment-legend" class="forecast-segment-legend" aria-label="Forecast horizon segments"></div>
+              <div id="scenario-chart-legend" class="scenario-chart-legend hidden" aria-label="Scenario forecast legend"></div>
+              <div id="scenario-event-token-strip" class="scenario-event-token-strip hidden" aria-label="Highlighted scenario events"></div>
               <div id="chart-loading-overlay" class="chart-loading-overlay hidden">
                 <span class="loading-dot"></span>
                 <span id="chart-loading-message">차트 데이터 불러오는 중</span>
@@ -67,6 +75,10 @@
                   <strong id="backtest-origin-value">-</strong>
                 </div>
               </div>
+              <section id="scenario-panel" class="scenario-panel hidden" aria-label="Scenario controls">
+                <div id="scenario-workspace" class="scenario-workspace"></div>
+                <div id="scenario-popover" class="scenario-popover hidden" role="dialog" aria-live="polite"></div>
+              </section>
               <section class="metrics">
                 <article class="metric-card">
                   <h3>
@@ -149,6 +161,6 @@
     </main>
 
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
-    <script src="/static/main.js?v=20260608-mode-wordmark"></script>
+    <script src="/static/main.js?v=20260612-toggle-labels-v1"></script>
   </body>
 </html>

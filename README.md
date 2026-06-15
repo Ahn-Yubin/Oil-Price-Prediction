@@ -67,6 +67,7 @@ export LLM_CONTEXT_MODE=google_generative
 export LLM_API_KEY="YOUR_GOOGLE_API_KEY"
 export LLM_API_BASE="https://generativelanguage.googleapis.com/v1beta"
 export LLM_MODEL="gemma-3-27b-it"
+export LLM_REQUEST_TIMEOUT_SECONDS=45
 ```
 
 `export`는 현재 shell에만 남습니다. 터미널을 닫으면 사라집니다. 프로젝트별 지속 설정은 `.env`를 사용합니다. 이 저장소의 주요 server/script entrypoint는 프로젝트 루트 `.env`를 자동 로드합니다.
@@ -85,6 +86,7 @@ print("enable_llm_context:", s.enable_llm_context)
 print("enable_external_llm_calls:", s.enable_external_llm_calls)
 print("llm_model:", s.llm_model)
 print("llm_api_base:", s.llm_api_base)
+print("llm_request_timeout_seconds:", s.llm_request_timeout_seconds)
 print("llm_api_key_set:", bool(s.llm_api_key))
 PY
 ```

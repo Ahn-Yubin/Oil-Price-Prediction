@@ -56,6 +56,9 @@ When the dashboard opens a symbol or the interval/horizon changes, it runs the f
 10. `/api/assistant-chat` answers short user-entered questions.
     It also does not create new numeric price forecasts. The UI shows a growing-dot assistant bubble while a chat answer is pending and blocks duplicate submits.
 
+11. `/api/scenarios/forecast` converts a user-entered bundle of future events into structured context.
+    The Scenario mode title/content/event time goes to the external LLM context encoder. The LLM returns event type, directional bias, impact, uncertainty, and event embedding instead of price numbers. The backend combines that output with each event's `event_time` to build a forecast-horizon event-context schedule, then passes an `event_context_frame` with only the events active by that horizon into `oil_context_fusion`. The future event timestamp remains in `scenario_event_time`, `model_context_schedule` metadata, and the LLM input, but future prices or realized returns never enter the model input.
+
 ## Allowed Roles
 
 - Convert news, economic events, and supply events into structured market context.
@@ -64,6 +67,7 @@ When the dashboard opens a symbol or the interval/horizon changes, it runs the f
 - Affect gating, confidence, and uncertainty indirectly inside `oil_context_fusion`.
 - Provide historical context markers and scenario commentary through `/api/market-context`.
 - Write commentary/news/report prose from already-computed forecasts and supplied news evidence through `/api/dashboard-analysis`.
+- Convert user-entered future events into structured event context through `/api/scenarios/forecast`.
 
 ## Forbidden Roles
 
@@ -96,6 +100,7 @@ export LLM_CONTEXT_MODE=google_generative
 export LLM_API_KEY="YOUR_GOOGLE_API_KEY"
 export LLM_API_BASE="https://generativelanguage.googleapis.com/v1beta"
 export LLM_MODEL="gemma-3-27b-it"
+export LLM_REQUEST_TIMEOUT_SECONDS=45
 ```
 
 Use the actual model ID shown by Google AI Studio or the model list. Seeing “Gemma 4” in a UI does not imply the API model id is `gemma4`. Google's OpenAI-compatible examples are centered on Gemini model IDs, while hosted Gemma uses the native `models/{model}:generateContent` endpoint.

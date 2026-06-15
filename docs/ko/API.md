@@ -10,6 +10,7 @@ API는 기존 chart frontend와의 호환성을 유지하면서 신규 forecast/
 | `GET /api/models` | model registry, artifact availability, metadata |
 | `GET /api/data-status?symbol=CL=F&interval=1d` | 데이터 source, resolved symbol, stale 여부 |
 | `GET /api/forecast?symbol=CL=F&interval=1d` | candle, quantile forecast, scenario, regime, model metadata |
+| `POST /api/scenarios/forecast` | 사용자 입력 미래 사건 묶음을 horizon별 LLM event context로 변환한 뒤 시나리오 forecast path 생성 |
 | `GET /api/chart?symbol=CL=F&interval=1d&horizon=7` | 기존 chart payload. backward compatibility 대상 |
 | `GET /api/market-context?symbol=CL=F&interval=1d` | 뉴스, context marker, scenario commentary |
 | `GET /api/dashboard-analysis?symbol=CL=F&interval=1d` | AI 시황 해설, 뉴스 해석, 예측 리포트를 한 번의 외부 LLM 호출로 생성 |
@@ -52,6 +53,36 @@ API는 기존 chart frontend와의 호환성을 유지하면서 신규 forecast/
 - `warnings`, `warning_objects`: degraded 상태와 조치
 
 Forecast price는 volatility-scaled cumulative log return에서 복원된 값입니다.
+
+## `/api/scenarios/forecast`
+
+Scenario mode에서 만든 시나리오 폴더의 미래 사건 묶음을 처리하는 additive endpoint입니다. Request body는 `title`, `content`, optional `event_time`, additive `events[]`, `symbol`, `interval`, `horizon`, `models`를 받습니다. `events[]`의 각 항목은 `title`, `content`, `event_time`을 가집니다.
+
+처리 방식:
+
+- 사용자 입력은 외부 LLM context encoder에 전달됩니다.
+- LLM은 이벤트 종류, 방향성, 영향도, 불확실성, event embedding만 반환해야 합니다.
+- Backend는 여러 이벤트를 예측 horizon별 event-context schedule로 바꿉니다. 특정 horizon에서는 그 시점까지 발생한 이벤트만 활성 context로 들어갑니다.
+- `oil_context_fusion`은 각 horizon 구간의 context vector를 입력 feature로 사용해 숫자 forecast path를 계산합니다. 시나리오 path는 모델 출력에 사후 보정 배열을 더하지 않습니다.
+- LLM이 직접 `p50`, `p90`, 목표가, 미래 return path를 만들면 validator가 해당 구조화 출력을 거부합니다.
+
+`event_time`은 미래 사건의 발생 시각 메타데이터이자 horizon별 context 활성화 기준입니다. 모델 입력에는 미래 가격 정보가 들어가지 않으며, 사건 시각은 LLM 입력, `llm_context_summary.scenario_event_time`, `llm_context_summary.model_context_schedule`에 남습니다. `event_time`이 없으면 본문 안의 “모레/다음 주” 같은 표현을 LLM이 `generated_at` 기준으로 해석하지만, API는 warning을 함께 반환합니다.
+
+반환 내용:
+
+- `points`: 차트 overlay용 시나리오 path. 첫 점은 현재 가격 anchor입니다.
+- `forecast`: quantile forecast path
+- `llm_context_summary`: scenario override 출처, bias, impact, uncertainty, horizon별 `model_context_schedule`
+- `llm_context`: 검증된 구조화 event context
+- `warning_objects`: LLM fallback, event_time 누락, artifact/data 품질 경고
+
+예시:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/scenarios/forecast" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"공급 충격 후 증산","content":"호르무즈 봉쇄 후 OPEC 증산","events":[{"title":"호르무즈 봉쇄","content":"원유 수송 차질로 공급 우려가 커짐","event_time":"2026-06-21T00:00:00Z"},{"title":"OPEC 증산","content":"OPEC이 원유 생산량을 늘림","event_time":"2026-07-01T00:00:00Z"}],"symbol":"CL=F","interval":"1d","horizon":30}'
+```
 
 ## `/api/market-context`
 

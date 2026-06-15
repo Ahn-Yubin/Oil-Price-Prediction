@@ -50,9 +50,15 @@ let analysisRequestVersion = 0;
 let activeAnalysisRequestId = 0;
 let pendingAnalysisRefresh = null;
 let latestAnalysisPayloadKey = "";
-let loadingState = { chart: false, context: false, commentary: false, backtest: false, report: false };
+let loadingState = { chart: false, context: false, commentary: false, backtest: false, scenario: false, report: false };
+let blockingRefreshActive = false;
 let lastChartUpdatedAt = null;
 let chatRequestInFlight = false;
+let scenarioItems = [];
+let scenarioCounter = 0;
+let selectedScenarioId = null;
+let scenarioPopoverState = null;
+let highlightedScenarioId = null;
 
 const CONTEXT_REFRESH_MS = 300_000;
 const COMMENTARY_REFRESH_MS = 600_000;
@@ -94,6 +100,7 @@ const DEFAULT_MODEL_ORDER = [
 ];
 
 const DEFAULT_VISIBLE_MODELS = new Set(["oil_context_fusion"]);
+const SCENARIO_COLORS = ["#c084fc", "#58a6ff", "#f2cc60", "#34d399", "#ff7b72", "#e879f9", "#79c0ff"];
 
 const TERM_HELP = {
   ko: {
@@ -173,6 +180,7 @@ const I18N = {
     horizon: "예측 기간",
     backtest: "백테스트",
     live: "라이브",
+    scenario: "시나리오",
     llmCommentary: "AI 시황 해설",
     newsContext: "뉴스 해석",
     bull: "상방",
@@ -190,6 +198,8 @@ const I18N = {
     origin: "기준 시점",
     loading: "로딩 중",
     actual: "실제값",
+    postCutoff: "컷오프 이후",
+    trainingOverlap: "학습 구간 겹침",
     llm: "AI 해설",
     fallback: "대체 경로",
     cached: "캐시",
@@ -207,7 +217,8 @@ const I18N = {
     refreshingChart: "시장 데이터 갱신 중",
     loadingNews: "실시간 뉴스 갱신 중",
     loadingCommentary: "AI 시황 갱신 중",
-    commentaryGenerating: "해설 생성 중입니다.",
+    loadingScenario: "시나리오 예측 중",
+    commentaryGenerating: "인공지능 전문가가 답변을 작성하고 있어요.",
     selectOriginFirst: "백테스트 모드입니다. 차트를 클릭하면 그 시점부터 예측과 실제 가격 흐름을 비교합니다.",
     backtestClickGuide: "백테스트 모드입니다. 차트를 클릭하면 그 시점부터 예측과 실제 가격 흐름을 비교합니다.",
     latestUpdates: "최신 업데이트",
@@ -235,6 +246,35 @@ const I18N = {
     forecastWeek1: "1주",
     forecastWeek2: "2주",
     forecastMonth: "한달",
+    scenarioPanelTitle: "시나리오 비교",
+    scenarioModeGuide: "시나리오 모드입니다. 폴더에 미래 이벤트를 묶으면 차트에서 라이브 예측과 비교합니다.",
+    scenarioAdd: "시나리오 추가",
+    scenarioAddScenario: "시나리오 추가",
+    scenarioAddEvent: "이벤트 추가",
+    scenarioFolder: "시나리오",
+    scenarioTitle: "제목",
+    scenarioTitlePlaceholder: "예: 이란 공급 충격",
+    scenarioEventTitle: "이벤트 제목",
+    scenarioEventTitlePlaceholder: "예: 호르무즈 해협 봉쇄",
+    scenarioEventTime: "발생 시점",
+    scenarioContent: "내용",
+    scenarioContentPlaceholder: "예: 모레 트럼프가 이란을 다시 침공하면 유가 동향은?",
+    scenarioSubmit: "예측",
+    scenarioCreate: "추가",
+    scenarioUpdate: "수정",
+    scenarioCancel: "취소",
+    scenarioEmpty: "시나리오가 없습니다.",
+    scenarioEventsEmpty: "이벤트가 없습니다.",
+    scenarioNeedsEvents: "클릭해서 이벤트를 추가하세요",
+    scenarioPending: "외부 LLM이 이벤트 컨텍스트로 변환 중",
+    scenarioError: "시나리오 예측 실패",
+    scenarioVisible: "표시",
+    scenarioEdit: "편집",
+    scenarioDelete: "삭제",
+    scenarioCloseDetails: "상세 닫기",
+    scenarioEventCount: "이벤트",
+    scenarioChartTimeSelected: "차트에서 발생 시점을 선택했습니다.",
+    scenarioTimeLimit: "발생 시점은 최대 30일 예측 구간 안에서만 선택할 수 있습니다.",
   },
   en: {
     appTitle: "Oil Price Forecast Dashboard",
@@ -245,6 +285,7 @@ const I18N = {
     horizon: "Forecast Length",
     backtest: "Backtest",
     live: "Live",
+    scenario: "Scenario",
     llmCommentary: "AI Market Commentary",
     newsContext: "News Interpretation",
     bull: "Bull",
@@ -262,6 +303,8 @@ const I18N = {
     origin: "Origin",
     loading: "Loading",
     actual: "Actual",
+    postCutoff: "Post-cutoff",
+    trainingOverlap: "Training overlap",
     llm: "AI commentary",
     fallback: "fallback",
     cached: "cached",
@@ -279,7 +322,8 @@ const I18N = {
     refreshingChart: "Refreshing market data",
     loadingNews: "Refreshing live news",
     loadingCommentary: "Refreshing AI market commentary",
-    commentaryGenerating: "Generating commentary.",
+    loadingScenario: "Forecasting scenario",
+    commentaryGenerating: "The AI market expert is writing an answer.",
     selectOriginFirst: "Backtest mode. Click the chart to compare the forecast with the actual price path from that point.",
     backtestClickGuide: "Backtest mode. Click the chart to compare the forecast with the actual price path from that point.",
     latestUpdates: "Latest Updates",
@@ -307,6 +351,35 @@ const I18N = {
     forecastWeek1: "1W",
     forecastWeek2: "2W",
     forecastMonth: "1M",
+    scenarioPanelTitle: "Scenario Comparison",
+    scenarioModeGuide: "Scenario mode. Bundle future events into folders and compare their paths with the live forecast.",
+    scenarioAdd: "Add scenario",
+    scenarioAddScenario: "Add scenario",
+    scenarioAddEvent: "Add event",
+    scenarioFolder: "Scenario",
+    scenarioTitle: "Title",
+    scenarioTitlePlaceholder: "e.g. Iran supply shock",
+    scenarioEventTitle: "Event title",
+    scenarioEventTitlePlaceholder: "e.g. Strait of Hormuz disruption",
+    scenarioEventTime: "Event time",
+    scenarioContent: "Content",
+    scenarioContentPlaceholder: "e.g. What happens to oil if Iran is invaded again the day after tomorrow?",
+    scenarioSubmit: "Forecast",
+    scenarioCreate: "Add",
+    scenarioUpdate: "Update",
+    scenarioCancel: "Cancel",
+    scenarioEmpty: "No scenarios yet.",
+    scenarioEventsEmpty: "No events yet.",
+    scenarioNeedsEvents: "Click to add events",
+    scenarioPending: "External LLM is encoding event context",
+    scenarioError: "Scenario forecast failed",
+    scenarioVisible: "Visible",
+    scenarioEdit: "Edit",
+    scenarioDelete: "Delete",
+    scenarioCloseDetails: "Close details",
+    scenarioEventCount: "events",
+    scenarioChartTimeSelected: "Event time selected from the chart.",
+    scenarioTimeLimit: "Event time must stay inside the 30-day forecast horizon.",
   },
 };
 
@@ -466,6 +539,7 @@ function activeLoadingMessages() {
   if (loadingState.context) messages.push(t("loadingNews"));
   if (loadingState.commentary) messages.push(t("loadingCommentary"));
   if (loadingState.backtest) messages.push(t("loading"));
+  if (loadingState.scenario) messages.push(t("loadingScenario"));
   if (loadingState.report) messages.push(t("reportGenerating"));
   return messages;
 }
@@ -496,11 +570,17 @@ function setLoadingState(kind, active) {
   }
   setChartUpdatedValue();
   if (chartOverlay && chartMessage) {
-    const showChartOverlay = loadingState.chart && !latestPayload;
-    chartMessage.textContent = t("loadingChart");
+    const messages = activeLoadingMessages();
+    const showChartOverlay = blockingRefreshActive || (loadingState.chart && !latestPayload);
+    chartMessage.textContent = messages.length ? messages[0] : t("loadingChart");
     chartOverlay.classList.toggle("hidden", !showChartOverlay);
   }
   updateReportActionButton();
+}
+
+function setBlockingRefresh(active) {
+  blockingRefreshActive = Boolean(active);
+  setLoadingState("chart", loadingState.chart);
 }
 
 function applyLanguage() {
@@ -541,6 +621,7 @@ function applyLanguage() {
     renderContextMarkers(matchingAnalysisPayload ? latestContextPayload : null);
   }
   updateBacktestControls();
+  renderScenarioPanel();
   setLoadingState("chart", loadingState.chart);
 }
 
@@ -597,6 +678,38 @@ async function loadBacktestVisualization(symbol, interval, originTime, models = 
   return response.json();
 }
 
+async function loadScenarioForecast({ title, content, eventTime, events = [], symbol, interval, models = "", horizon = "" }) {
+  const response = await fetch(`/api/scenarios/forecast?_ts=${Date.now()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({
+      title,
+      content,
+      event_time: eventTime || null,
+      events,
+      symbol: symbol || DEFAULT_SYMBOL,
+      interval: interval || DEFAULT_INTERVAL,
+      horizon: horizon ? Number(horizon) : DEFAULT_HORIZON,
+      models,
+      language: currentLanguage,
+    }),
+  });
+  if (!response.ok) {
+    let message = t("scenarioError");
+    try {
+      const body = await response.json();
+      if (body && body.detail) {
+        message = typeof body.detail === "string" ? body.detail : body.detail.message || JSON.stringify(body.detail);
+      }
+    } catch (_err) {
+      // ignore parse failure
+    }
+    throw new Error(message);
+  }
+  return response.json();
+}
+
 function convertForecastToChartPayload(forecast) {
   const candles = forecast.candles || [];
   const last = candles.length ? candles[candles.length - 1] : null;
@@ -621,14 +734,18 @@ function convertForecastToChartPayload(forecast) {
     });
   }
   const warningObjects = Array.isArray(forecast.warning_objects) ? forecast.warning_objects : [];
+  const isNonActionableNotice = (message) =>
+    /hypothetical scenario provided for context encoding/i.test(String(message || ""));
   const warningMessages = warningObjects.length
     ? warningObjects
         .filter((item) => ["warning", "error"].includes(String(item.severity || "warning")))
         .map((item) => item.message)
-    : forecast.warnings || [];
+        .filter((message) => !isNonActionableNotice(message))
+    : (forecast.warnings || []).filter((message) => !isNonActionableNotice(message));
   const infoMessages = warningObjects
     .filter((item) => String(item.severity || "warning") === "info")
-    .map((item) => item.message);
+    .map((item) => item.message)
+    .filter((message) => !isNonActionableNotice(message));
   return {
     candles,
     predicted: lineFrom("p50"),
@@ -747,6 +864,7 @@ function localizeRole(value) {
   if (text === "bearish") return "하방 흐름";
   if (text === "mixed") return "엇갈린 흐름";
   if (text === "neutral") return "중립 흐름";
+  if (text === "unknown") return "방향 검토 중";
   return text;
 }
 
@@ -905,7 +1023,7 @@ function markerForContextPoint(point) {
 function renderContextMarkers(contextPayload) {
   if (!candleSeriesRef || typeof candleSeriesRef.setMarkers !== "function") return;
   const markers = [];
-  if (activeBacktestOriginMarker) {
+  if (chartMode === "backtest" && activeBacktestOriginMarker) {
     markers.push(activeBacktestOriginMarker);
   }
   candleSeriesRef.setMarkers(markers);
@@ -1993,13 +2111,434 @@ function forecastModelsQuery() {
   return "";
 }
 
+function scenarioColor(index) {
+  return SCENARIO_COLORS[index % SCENARIO_COLORS.length];
+}
+
+function scenarioForecastAnchorUnix() {
+  const candles = latestLivePayload?.candles?.length ? latestLivePayload.candles : latestPayload?.candles || [];
+  const lastCandle = candles.length ? candles[candles.length - 1] : null;
+  return toUnixTime(lastCandle?.time) || Math.floor(Date.now() / 1000);
+}
+
+function scenarioEventTimeBounds() {
+  const anchor = scenarioForecastAnchorUnix();
+  const currentMinute = Math.floor(Date.now() / 60_000) * 60;
+  const min = Math.max(anchor, currentMinute);
+  return { min, max: Math.max(anchor + DEFAULT_HORIZON * 86_400, min) };
+}
+
+function localDateTimeInputValue(value) {
+  const date = value instanceof Date ? value : new Date(typeof value === "number" ? value * 1000 : value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function localDateInputValue(value) {
+  return localDateTimeInputValue(value).slice(0, 10);
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function roundUnixToFiveMinutes(unix) {
+  return Math.ceil(Number(unix || 0) / 300) * 300;
+}
+
+function scenarioDateOptions(bounds) {
+  const start = new Date(roundUnixToFiveMinutes(bounds.min) * 1000);
+  const end = new Date(bounds.max * 1000);
+  const current = new Date(start);
+  current.setHours(0, 0, 0, 0);
+  const options = [];
+  while (current <= end && options.length <= DEFAULT_HORIZON + 1) {
+    const value = localDateInputValue(current);
+    const label =
+      currentLanguage === "ko"
+        ? `${current.getFullYear()}년 ${current.getMonth() + 1}월 ${current.getDate()}일`
+        : current.toLocaleDateString(localeCode(), { year: "numeric", month: "short", day: "numeric" });
+    options.push({ value, label });
+    current.setDate(current.getDate() + 1);
+  }
+  return options;
+}
+
+function centerWheelSelect(select) {
+  if (!select) return;
+  const selectedIndex = Math.max(0, select.selectedIndex);
+  const optionHeight = 28;
+  const targetTop = Math.max(0, selectedIndex * optionHeight - (select.clientHeight - optionHeight) / 2);
+  select.scrollTo({ top: targetTop, behavior: "smooth" });
+}
+
+function fillWheelSelect(select, options, value) {
+  select.replaceChildren(
+    ...options.map((option) => {
+      const node = document.createElement("option");
+      node.value = option.value;
+      node.textContent = option.label;
+      return node;
+    }),
+  );
+  select.value = value;
+  window.requestAnimationFrame(() => centerWheelSelect(select));
+}
+
+function setScenarioEventTimeInputValue(input, value) {
+  if (!input) return;
+  const normalized = localDateTimeInputValue(value);
+  input.value = normalized;
+  const form = input.closest(".scenario-popover-form") || input.parentElement;
+  if (!form) return;
+  const [dateValue, timeValue = "00:00"] = normalized.split("T");
+  const [hourValue = "00", minuteValue = "00"] = timeValue.split(":");
+  const dateSelect = form.querySelector('[data-time-wheel="date"]');
+  const hourSelect = form.querySelector('[data-time-wheel="hour"]');
+  const minuteSelect = form.querySelector('[data-time-wheel="minute"]');
+  if (dateSelect) dateSelect.value = dateValue;
+  if (hourSelect) hourSelect.value = hourValue;
+  if (minuteSelect) minuteSelect.value = pad2(Math.min(55, Math.round(Number(minuteValue || 0) / 5) * 5));
+  [dateSelect, hourSelect, minuteSelect].forEach((select) => {
+    if (select) window.requestAnimationFrame(() => centerWheelSelect(select));
+  });
+}
+
+function createScenarioTimeWheel(input, bounds) {
+  const rounded = roundUnixToFiveMinutes(bounds.min);
+  const defaultValue = localDateTimeInputValue(rounded);
+  input.value = defaultValue;
+  const [defaultDate, defaultTime = "00:00"] = defaultValue.split("T");
+  const [defaultHour = "00", defaultMinute = "00"] = defaultTime.split(":");
+
+  const wheel = document.createElement("div");
+  wheel.className = "scenario-time-wheel";
+  const dateSelect = document.createElement("select");
+  dateSelect.dataset.timeWheel = "date";
+  dateSelect.size = 5;
+  const hourSelect = document.createElement("select");
+  hourSelect.dataset.timeWheel = "hour";
+  hourSelect.size = 5;
+  const minuteSelect = document.createElement("select");
+  minuteSelect.dataset.timeWheel = "minute";
+  minuteSelect.size = 5;
+  const makeColumn = (select, labelText) => {
+    const column = document.createElement("div");
+    column.className = "scenario-time-wheel-column";
+    const caption = document.createElement("span");
+    caption.className = "scenario-time-wheel-caption";
+    caption.textContent = labelText;
+    column.append(caption, select);
+    return column;
+  };
+
+  fillWheelSelect(dateSelect, scenarioDateOptions(bounds), defaultDate);
+  fillWheelSelect(
+    hourSelect,
+    Array.from({ length: 24 }, (_item, hour) => ({ value: pad2(hour), label: pad2(hour) })),
+    defaultHour,
+  );
+  fillWheelSelect(
+    minuteSelect,
+    Array.from({ length: 12 }, (_item, step) => ({ value: pad2(step * 5), label: pad2(step * 5) })),
+    pad2(Math.min(55, Math.round(Number(defaultMinute || 0) / 5) * 5)),
+  );
+
+  const sync = () => {
+    input.value = `${dateSelect.value}T${hourSelect.value}:${minuteSelect.value}`;
+  };
+  [dateSelect, hourSelect, minuteSelect].forEach((select) => {
+    select.addEventListener("change", () => {
+      sync();
+      centerWheelSelect(select);
+    });
+    select.addEventListener("click", () => {
+      sync();
+      window.requestAnimationFrame(() => centerWheelSelect(select));
+    });
+    select.addEventListener("keyup", () => {
+      sync();
+      centerWheelSelect(select);
+    });
+  });
+  const labels =
+    currentLanguage === "ko"
+      ? { date: "날짜", hour: "시", minute: "분" }
+      : { date: "Date", hour: "Hour", minute: "Min" };
+  wheel.append(makeColumn(dateSelect, labels.date), makeColumn(hourSelect, labels.hour), makeColumn(minuteSelect, labels.minute));
+  return wheel;
+}
+
+function scenarioEventTimeFromInput(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const unix = Math.floor(parsed.getTime() / 1000);
+  const bounds = scenarioEventTimeBounds();
+  if (unix < bounds.min || unix > bounds.max) return null;
+  return parsed.toISOString();
+}
+
+function scenarioEventTimeIsInRange(value) {
+  const ts = toUnixTime(value);
+  if (ts === null) return false;
+  const bounds = scenarioEventTimeBounds();
+  return ts >= bounds.min && ts <= bounds.max;
+}
+
+function scenarioLabel(item) {
+  const index = scenarioItems.findIndex((scenario) => scenario.id === item.id);
+  const number = index >= 0 ? index + 1 : 1;
+  return currentLanguage === "ko" ? `시나리오 ${number}` : `Scenario ${number}`;
+}
+
+function selectedScenario() {
+  return scenarioItems.find((item) => item.id === selectedScenarioId) || null;
+}
+
+function scenarioForecastContent(item) {
+  return (item.events || [])
+    .map((event, index) => {
+      const timeText = event.eventTime ? formatDateTimeValue(event.eventTime) : "-";
+      return [
+        `Event ${index + 1}: ${event.title || "-"}`,
+        `Occurrence time: ${timeText}`,
+        `Details: ${event.content || "-"}`,
+      ].join("\n");
+    })
+    .join("\n\n");
+}
+
+function earliestScenarioEventTime(item) {
+  const times = (item.events || [])
+    .map((event) => event.eventTime)
+    .filter(Boolean)
+    .map((value) => new Date(value).getTime())
+    .filter((value) => Number.isFinite(value));
+  if (!times.length) return null;
+  return new Date(Math.min(...times)).toISOString();
+}
+
+function scenarioEventCountText(item) {
+  const count = item.events?.length || 0;
+  return currentLanguage === "ko" ? `${count}${t("scenarioEventCount")}` : `${count} ${t("scenarioEventCount")}`;
+}
+
+function formatScenarioMeta(item) {
+  if (item.status === "loading") return t("scenarioPending");
+  if (item.status === "error") return item.error || t("scenarioError");
+  if (!item.events?.length) return t("scenarioNeedsEvents");
+  if (item.status !== "ready" || !item.response) return t("scenarioNeedsEvents");
+  const summary = item.response?.llm_context_summary || {};
+  const bias = localizeRole(summary.overall_bias || item.response?.llm_context?.overall_bias || "neutral");
+  const impact = Number(summary.impact_score ?? item.response?.llm_context?.impact_score);
+  const impactText = Number.isFinite(impact) ? `${Math.round(impact * 100)}%` : "-";
+  return currentLanguage === "ko" ? `${bias} · 영향 ${impactText}` : `${bias} · impact ${impactText}`;
+}
+
+function scenarioModelFromItem(item) {
+  const points = Array.isArray(item.response?.points) ? item.response.points : [];
+  return {
+    id: `scenario_${item.id}`,
+    label: scenarioLabel(item),
+    description: item.title,
+    color: item.color,
+    points: points.map((point) => ({ time: point.time, value: point.value })),
+  };
+}
+
+function scenarioItemFromModelId(modelId) {
+  const itemId = String(modelId || "").replace(/^scenario_/, "");
+  return scenarioItems.find((item) => item.id === itemId) || null;
+}
+
+function colorWithAlpha(color, alpha) {
+  const text = String(color || "").trim();
+  if (/^#([\da-f]{6})$/i.test(text)) {
+    const hex = text.slice(1);
+    const red = parseInt(hex.slice(0, 2), 16);
+    const green = parseInt(hex.slice(2, 4), 16);
+    const blue = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+  }
+  return text;
+}
+
+function setHighlightedScenario(id = null) {
+  if (highlightedScenarioId === id) {
+    positionScenarioEventTokens();
+    return;
+  }
+  highlightedScenarioId = id;
+  applyScenarioHighlight();
+  renderScenarioEventTokens();
+}
+
+function bindScenarioHighlight(node, getId) {
+  const show = () => setHighlightedScenario(typeof getId === "function" ? getId() : getId);
+  const hide = () => setHighlightedScenario(null);
+  node.addEventListener("mouseenter", show);
+  node.addEventListener("pointerenter", show);
+  node.addEventListener("focus", show);
+  node.addEventListener("focusin", show);
+  node.addEventListener("mouseleave", hide);
+  node.addEventListener("pointerleave", hide);
+  node.addEventListener("blur", hide);
+  node.addEventListener("focusout", hide);
+}
+
+function scenarioChartTimes() {
+  const times = [
+    ...(latestPayload?.candles || []).map((point) => Number(point.time)),
+    ...(latestPayload?.predicted || []).map((point) => Number(point.time)),
+    ...(latestLivePayload?.candles || []).map((point) => Number(point.time)),
+    ...(latestLivePayload?.predicted || []).map((point) => Number(point.time)),
+    ...activeScenarioModels().flatMap((model) => (model.points || []).map((point) => Number(point.time))),
+  ].filter((value) => Number.isFinite(value));
+  return [...new Set(times)].sort((a, b) => a - b);
+}
+
+function chartCoordinateForUnix(unix) {
+  const ts = Number(unix);
+  const timeScale = chartRef?.timeScale?.();
+  if (!timeScale || typeof timeScale.timeToCoordinate !== "function" || !Number.isFinite(ts)) return null;
+  try {
+    const exact = timeScale.timeToCoordinate(ts);
+    if (typeof exact === "number" && Number.isFinite(exact)) return exact;
+  } catch {
+    // Fall through to nearest visible chart point.
+  }
+  const nearest = scenarioChartTimes().reduce((best, value) => {
+    if (best === null) return value;
+    return Math.abs(value - ts) < Math.abs(best - ts) ? value : best;
+  }, null);
+  if (nearest === null) return null;
+  try {
+    const snapped = timeScale.timeToCoordinate(nearest);
+    return typeof snapped === "number" && Number.isFinite(snapped) ? snapped : null;
+  } catch {
+    return null;
+  }
+}
+
+function renderScenarioEventTokens() {
+  const root = document.getElementById("scenario-event-token-strip");
+  if (!root) return;
+  const item = highlightedScenarioId ? scenarioItems.find((scenario) => scenario.id === highlightedScenarioId) : null;
+  if (chartMode !== "scenario" || !item || !item.events?.length) {
+    root.replaceChildren();
+    root.classList.add("hidden");
+    return;
+  }
+  const tokens = item.events.map((eventItem) => {
+    const token = document.createElement("span");
+    token.className = "scenario-event-token";
+    token.style.setProperty("--scenario-color", item.color);
+    token.dataset.eventTime = eventItem.eventTime || "";
+    const dot = document.createElement("i");
+    dot.setAttribute("aria-hidden", "true");
+    const label = document.createElement("strong");
+    label.textContent = eventItem.title || t("scenarioEventTitle");
+    const time = document.createElement("small");
+    time.textContent = eventItem.eventTime ? formatDateTimeValue(eventItem.eventTime) : "";
+    token.append(dot, label, time);
+    return token;
+  });
+  root.replaceChildren(...tokens);
+  root.classList.remove("hidden");
+  positionScenarioEventTokens();
+}
+
+function positionScenarioEventTokens() {
+  const root = document.getElementById("scenario-event-token-strip");
+  if (!root || root.classList.contains("hidden")) return;
+  root.querySelectorAll(".scenario-event-token").forEach((token) => {
+    if (!(token instanceof HTMLElement)) return;
+    const ts = toUnixTime(token.dataset.eventTime || "");
+    const x = ts !== null ? chartCoordinateForUnix(ts) : null;
+    if (typeof x !== "number" || Number.isNaN(x)) {
+      token.dataset.hidden = "true";
+      return;
+    }
+    delete token.dataset.hidden;
+    const maxX = Math.max(22, root.clientWidth - 22);
+    token.style.left = `${Math.round(Math.min(Math.max(x, 22), maxX))}px`;
+  });
+}
+
+function valueFromSeriesDatum(raw) {
+  if (typeof raw === "number") return raw;
+  if (raw && typeof raw === "object") {
+    if (Number.isFinite(Number(raw.value))) return Number(raw.value);
+    if (Number.isFinite(Number(raw.close))) return Number(raw.close);
+  }
+  return null;
+}
+
+function scenarioIdFromCrosshair(param) {
+  if (chartMode !== "scenario" || !param?.time) return null;
+  const seriesMap = param.seriesData || param.seriesPrices;
+  if (!seriesMap || typeof seriesMap.get !== "function") return null;
+  const pointerY = Number(param.point?.y);
+  const canMeasureDistance = Number.isFinite(pointerY);
+  let best = null;
+  activeScenarioModels().forEach((model) => {
+    const scenario = scenarioItemFromModelId(model.id);
+    const series = forecastModelSeriesRefs.get(model.id);
+    if (!scenario || !series) return;
+    const value = valueFromSeriesDatum(seriesMap.get(series));
+    if (!Number.isFinite(value)) return;
+    let distance = 0;
+    if (canMeasureDistance && typeof series.priceToCoordinate === "function") {
+      const y = series.priceToCoordinate(value);
+      if (!Number.isFinite(Number(y))) return;
+      distance = Math.abs(Number(y) - pointerY);
+    }
+    if (canMeasureDistance && distance > 18) return;
+    if (!best || distance < best.distance) best = { id: scenario.id, distance };
+  });
+  return best?.id || null;
+}
+
+function applyScenarioHighlight() {
+  forecastModelSeriesRefs.forEach((series, modelId) => {
+    const scenario = scenarioItemFromModelId(modelId);
+    if (!scenario || typeof series.applyOptions !== "function") return;
+    const dimmed = highlightedScenarioId && highlightedScenarioId !== scenario.id;
+    const focused = highlightedScenarioId && highlightedScenarioId === scenario.id;
+    series.applyOptions({
+      color: dimmed ? colorWithAlpha(scenario.color, 0.22) : scenario.color,
+      lineWidth: focused ? 3.4 : dimmed ? 1.1 : 2.2,
+    });
+  });
+  document.querySelectorAll(".scenario-chart-legend-item").forEach((node) => {
+    const id = node instanceof HTMLElement ? node.dataset.scenarioId : "";
+    node.toggleAttribute("data-dimmed", Boolean(highlightedScenarioId && highlightedScenarioId !== id));
+    node.toggleAttribute("data-focused", Boolean(highlightedScenarioId && highlightedScenarioId === id));
+  });
+}
+
+function activeScenarioModels() {
+  return scenarioItems
+    .filter((item) => item.visible && item.status === "ready" && item.response)
+    .map(scenarioModelFromItem);
+}
+
 function visibleForecastModels(models) {
-  void models;
-  return [];
+  if (chartMode !== "scenario") return [];
+  return (models || []).filter((model) => String(model.id || "").startsWith("scenario_"));
 }
 
 function toUnixTime(time) {
   if (typeof time === "number") return time;
+  if (typeof time === "string") {
+    const trimmed = time.trim();
+    if (/^\d+$/.test(trimmed)) return Number(trimmed);
+    const parsed = Date.parse(trimmed);
+    if (!Number.isNaN(parsed)) return Math.floor(parsed / 1000);
+  }
   if (time && typeof time === "object" && "year" in time && "month" in time && "day" in time) {
     return Math.floor(Date.UTC(time.year, time.month - 1, time.day) / 1000);
   }
@@ -2035,28 +2574,549 @@ function setBacktestStatus(message = "", severity = "info") {
   status.dataset.severity = severity;
 }
 
+function setScenarioLoadingFromItems() {
+  setLoadingState("scenario", scenarioItems.some((item) => item.status === "loading"));
+}
+
+function closeScenarioPopover() {
+  scenarioPopoverState = null;
+  const popover = document.getElementById("scenario-popover");
+  if (!popover) return;
+  popover.classList.add("hidden");
+  popover.replaceChildren();
+  popover.removeAttribute("data-kind");
+  popover.style.left = "";
+  popover.style.top = "";
+}
+
+function positionScenarioPopover(anchor) {
+  const popover = document.getElementById("scenario-popover");
+  const panel = document.getElementById("scenario-panel");
+  if (!popover || !panel || !anchor) return;
+  const panelRect = panel.getBoundingClientRect();
+  const anchorRect = anchor.getBoundingClientRect();
+  const width = popover.offsetWidth || 320;
+  const left = Math.max(10, Math.min(anchorRect.left - panelRect.left, panelRect.width - width - 10));
+  const top = Math.max(10, anchorRect.bottom - panelRect.top + 8);
+  popover.style.left = `${left}px`;
+  popover.style.top = `${top}px`;
+}
+
+function openScenarioPopover(kind, anchor, options = {}) {
+  if (kind === "event" && !selectedScenario()) return;
+  if (kind === "event-edit" && !selectedScenario()) return;
+  scenarioPopoverState = { kind, scenarioId: selectedScenarioId, ...options };
+  renderScenarioPopover(anchor);
+}
+
+function buildPopoverActions(submitLabel) {
+  const actions = document.createElement("div");
+  actions.className = "scenario-popover-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = t("scenarioCancel");
+  cancel.addEventListener("click", closeScenarioPopover);
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  submit.textContent = submitLabel;
+  actions.append(cancel, submit);
+  return actions;
+}
+
+function createSvgIcon(name) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.classList.add("scenario-svg-icon");
+  const paths = {
+    trash: [
+      "M3 6h18",
+      "M8 6V4h8v2",
+      "M19 6l-1 14H6L5 6",
+      "M10 11v5",
+      "M14 11v5",
+    ],
+    edit: [
+      "M12 20h9",
+      "M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z",
+    ],
+  };
+  (paths[name] || []).forEach((value) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", value);
+    svg.append(path);
+  });
+  return svg;
+}
+
+function createScenarioIconButton({ className = "", icon, label, title, onClick }) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `scenario-icon-button ${className}`.trim();
+  button.setAttribute("aria-label", label);
+  button.title = title || label;
+  button.append(createSvgIcon(icon));
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function renderScenarioPopover(anchor = null) {
+  const popover = document.getElementById("scenario-popover");
+  if (!popover || !scenarioPopoverState) return;
+  popover.replaceChildren();
+  popover.dataset.kind = scenarioPopoverState.kind;
+
+  const form = document.createElement("form");
+  form.className = "scenario-popover-form";
+  if (scenarioPopoverState.kind === "scenario") {
+    const label = document.createElement("label");
+    const caption = document.createElement("span");
+    caption.textContent = t("scenarioTitle");
+    const input = document.createElement("input");
+    input.id = "scenario-title-input";
+    input.type = "text";
+    input.maxLength = 160;
+    input.placeholder = t("scenarioTitlePlaceholder");
+    label.append(caption, input);
+    form.append(label, buildPopoverActions(t("scenarioCreate")));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const title = String(input.value || "").trim();
+      if (!title) return;
+      addScenarioFolder(title);
+    });
+  } else {
+    const isEventEdit = scenarioPopoverState.kind === "event-edit";
+    const parentScenario = selectedScenario();
+    const editingEvent = isEventEdit
+      ? (parentScenario?.events || []).find((eventItem) => eventItem.id === scenarioPopoverState.eventId)
+      : null;
+    const titleLabel = document.createElement("label");
+    const titleCaption = document.createElement("span");
+    titleCaption.textContent = t("scenarioEventTitle");
+    const titleInput = document.createElement("input");
+    titleInput.id = "scenario-event-title-input";
+    titleInput.type = "text";
+    titleInput.maxLength = 160;
+    titleInput.placeholder = t("scenarioEventTitlePlaceholder");
+    titleInput.value = editingEvent?.title || "";
+    titleLabel.append(titleCaption, titleInput);
+
+    const timeLabel = document.createElement("label");
+    const timeCaption = document.createElement("span");
+    timeCaption.textContent = t("scenarioEventTime");
+    const timeInput = document.createElement("input");
+    timeInput.id = "scenario-event-time-input";
+    timeInput.type = "hidden";
+    const bounds = scenarioEventTimeBounds();
+    timeInput.dataset.min = localDateTimeInputValue(bounds.min);
+    timeInput.dataset.max = localDateTimeInputValue(bounds.max);
+    const wheel = createScenarioTimeWheel(timeInput, bounds);
+    timeLabel.append(timeCaption, timeInput, wheel);
+    if (editingEvent?.eventTime) {
+      setScenarioEventTimeInputValue(timeInput, editingEvent.eventTime);
+    }
+
+    const contentLabel = document.createElement("label");
+    contentLabel.className = "scenario-popover-wide";
+    const contentCaption = document.createElement("span");
+    contentCaption.textContent = t("scenarioContent");
+    const contentInput = document.createElement("textarea");
+    contentInput.id = "scenario-content-input";
+    contentInput.maxLength = 4000;
+    contentInput.rows = 3;
+    contentInput.placeholder = t("scenarioContentPlaceholder");
+    contentInput.value = editingEvent?.content || "";
+    contentLabel.append(contentCaption, contentInput);
+
+    form.append(titleLabel, timeLabel, contentLabel, buildPopoverActions(isEventEdit ? t("scenarioUpdate") : t("scenarioCreate")));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const payload = {
+        title: String(titleInput.value || "").trim(),
+        eventTime: scenarioEventTimeFromInput(timeInput.value),
+        content: String(contentInput.value || "").trim(),
+        rawTime: timeInput.value,
+      };
+      if (isEventEdit && editingEvent) {
+        updateScenarioEvent(parentScenario.id, editingEvent.id, payload);
+        return;
+      }
+      addEventToSelectedScenario(payload);
+    });
+  }
+
+  popover.append(form);
+  popover.classList.remove("hidden");
+  positionScenarioPopover(anchor);
+  window.requestAnimationFrame(() => positionScenarioPopover(anchor));
+  form.querySelector("input, textarea")?.focus();
+}
+
+function addScenarioFolder(title) {
+  const item = {
+    id: `local_${Date.now()}_${scenarioCounter}`,
+    title,
+    color: scenarioColor(scenarioCounter),
+    visible: true,
+    status: "idle",
+    response: null,
+    error: "",
+    events: [],
+    requestId: 0,
+  };
+  scenarioCounter += 1;
+  scenarioItems = [...scenarioItems, item];
+  closeScenarioPopover();
+  renderScenarioPanel();
+  renderScenarioOverlays();
+}
+
+function deleteScenarioFolder(id) {
+  scenarioItems = scenarioItems.filter((item) => item.id !== id);
+  if (selectedScenarioId === id) selectedScenarioId = null;
+  if (highlightedScenarioId === id) highlightedScenarioId = null;
+  closeScenarioPopover();
+  renderScenarioPanel();
+  renderScenarioOverlays();
+  renderScenarioEventTokens();
+}
+
+function addEventToSelectedScenario({ title, eventTime, content, rawTime }) {
+  const item = selectedScenario();
+  if (!item || !title || !content || !rawTime) return;
+  if (!eventTime) {
+    setBacktestStatus(t("scenarioTimeLimit"), "warning");
+    return;
+  }
+  item.events = [
+    ...(item.events || []),
+    {
+      id: `event_${Date.now()}_${item.events?.length || 0}`,
+      title,
+      eventTime,
+      content,
+    },
+  ];
+  closeScenarioPopover();
+  void forecastScenarioItem(item);
+}
+
+function updateScenarioEvent(scenarioId, eventId, { title, eventTime, content, rawTime }) {
+  const item = scenarioItems.find((scenario) => scenario.id === scenarioId);
+  if (!item || !title || !content || !rawTime) return;
+  if (!eventTime) {
+    setBacktestStatus(t("scenarioTimeLimit"), "warning");
+    return;
+  }
+  item.events = (item.events || []).map((eventItem) =>
+    eventItem.id === eventId
+      ? {
+          ...eventItem,
+          title,
+          eventTime,
+          content,
+        }
+      : eventItem,
+  );
+  closeScenarioPopover();
+  void forecastScenarioItem(item);
+}
+
+function deleteScenarioEvent(scenarioId, eventId) {
+  const item = scenarioItems.find((scenario) => scenario.id === scenarioId);
+  if (!item) return;
+  item.events = (item.events || []).filter((event) => event.id !== eventId);
+  if (!item.events.length) {
+    item.status = "idle";
+    item.response = null;
+    item.error = "";
+    renderScenarioPanel();
+    renderScenarioOverlays();
+    renderScenarioEventTokens();
+    return;
+  }
+  void forecastScenarioItem(item);
+}
+
+async function forecastScenarioItem(item) {
+  if (!item || !item.events?.length) return;
+  const requestId = (item.requestId || 0) + 1;
+  item.requestId = requestId;
+  item.status = "loading";
+  item.error = "";
+  item.response = null;
+  renderScenarioPanel();
+  renderScenarioOverlays();
+  setScenarioLoadingFromItems();
+  try {
+    const response = await loadScenarioForecast({
+      title: item.title,
+      content: scenarioForecastContent(item),
+      eventTime: earliestScenarioEventTime(item),
+      events: (item.events || []).map((eventItem) => ({
+        title: eventItem.title,
+        content: eventItem.content,
+        event_time: eventItem.eventTime,
+      })),
+      symbol: currentOilSymbol(),
+      interval: currentInterval(),
+      models: forecastModelsQuery(),
+      horizon: currentHorizon(),
+    });
+    if (item.requestId !== requestId) return;
+    item.status = "ready";
+    item.response = response;
+    item.error = "";
+    setStatus(null);
+  } catch (error) {
+    if (item.requestId !== requestId) return;
+    item.status = "error";
+    item.error = error?.message || t("scenarioError");
+    setStatus(error?.message || t("scenarioError"), "error");
+  } finally {
+    if (item.requestId === requestId) {
+      renderScenarioPanel();
+      renderScenarioOverlays();
+      setScenarioLoadingFromItems();
+      updateBacktestControls();
+    }
+  }
+}
+
+function selectScenarioEventTimeFromChart(time) {
+  if (chartMode !== "scenario" || !["event", "event-edit"].includes(scenarioPopoverState?.kind)) return false;
+  const ts = toUnixTime(time);
+  if (ts === null || !scenarioEventTimeIsInRange(ts)) {
+    setBacktestStatus(t("scenarioTimeLimit"), "warning");
+    return false;
+  }
+  const input = document.getElementById("scenario-event-time-input");
+  if (!input) return false;
+  setScenarioEventTimeInputValue(input, ts);
+  setBacktestStatus(t("scenarioChartTimeSelected"), "guide");
+  return true;
+}
+
+function renderScenarioPanel() {
+  const panel = document.getElementById("scenario-panel");
+  const workspace = document.getElementById("scenario-workspace");
+  if (!panel || !workspace) return;
+  panel.classList.toggle("hidden", chartMode !== "scenario");
+  if (chartMode !== "scenario") {
+    workspace.replaceChildren();
+    closeScenarioPopover();
+    return;
+  }
+  if (selectedScenarioId && !selectedScenario()) selectedScenarioId = null;
+
+  const scenarioColumn = document.createElement("div");
+  scenarioColumn.className = "scenario-column scenario-folder-column";
+  const scenarioList = document.createElement("div");
+  scenarioList.className = "scenario-scroll-list";
+  if (!scenarioItems.length) {
+    const empty = document.createElement("p");
+    empty.className = "scenario-empty";
+    empty.textContent = t("scenarioEmpty");
+    scenarioList.append(empty);
+  }
+  scenarioItems.forEach((item) => {
+    const row = document.createElement("article");
+    row.className = "scenario-item scenario-folder-item";
+    row.dataset.status = item.status;
+    row.dataset.selected = item.id === selectedScenarioId ? "true" : "false";
+    row.style.setProperty("--scenario-color", item.color);
+
+    const dot = document.createElement("span");
+    dot.className = "scenario-color-dot";
+    dot.setAttribute("aria-hidden", "true");
+
+    const main = document.createElement("div");
+    main.className = "scenario-item-main";
+    main.setAttribute("role", "button");
+    main.tabIndex = 0;
+    const selectItem = () => {
+      selectedScenarioId = item.id;
+      closeScenarioPopover();
+      renderScenarioPanel();
+    };
+    main.addEventListener("click", selectItem);
+    main.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      selectItem();
+    });
+
+    const title = document.createElement("strong");
+    title.className = "scenario-item-title";
+    title.textContent = item.title || t("scenarioFolder");
+    title.title = item.title || "";
+    const meta = document.createElement("div");
+    meta.className = "scenario-item-meta";
+    meta.textContent = `${scenarioLabel(item)} · ${scenarioEventCountText(item)} · ${formatScenarioMeta(item)}`;
+    main.append(title, meta);
+
+    const controls = document.createElement("div");
+    controls.className = "scenario-item-controls";
+    const toggle = document.createElement("label");
+    toggle.className = "scenario-toggle";
+    toggle.setAttribute("aria-label", `${item.title} ${t("scenarioVisible")}`);
+    toggle.title = t("scenarioVisible");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = item.visible;
+    checkbox.disabled = item.status !== "ready";
+    checkbox.addEventListener("change", () => {
+      item.visible = checkbox.checked;
+      renderScenarioPanel();
+      renderScenarioOverlays();
+    });
+    const toggleTrack = document.createElement("span");
+    toggleTrack.className = "scenario-toggle-track";
+    toggleTrack.setAttribute("aria-hidden", "true");
+    toggle.append(checkbox, toggleTrack);
+    const remove = createScenarioIconButton({
+      className: "scenario-trash-button",
+      icon: "trash",
+      label: `${item.title} ${t("scenarioDelete")}`,
+      title: t("scenarioDelete"),
+      onClick: () => deleteScenarioFolder(item.id),
+    });
+    controls.append(toggle, remove);
+    row.append(dot, main, controls);
+    bindScenarioHighlight(row, item.id);
+    scenarioList.append(row);
+  });
+  const addScenario = document.createElement("button");
+  addScenario.id = "scenario-add-button";
+  addScenario.className = "scenario-inline-add";
+  addScenario.type = "button";
+  addScenario.textContent = "+";
+  addScenario.setAttribute("aria-label", t("scenarioAddScenario"));
+  addScenario.title = t("scenarioAddScenario");
+  addScenario.addEventListener("click", () => openScenarioPopover("scenario", addScenario));
+  scenarioList.append(addScenario);
+  scenarioColumn.append(scenarioList);
+
+  const activeScenario = selectedScenario();
+  if (!activeScenario) {
+    workspace.classList.remove("scenario-workspace-split");
+    workspace.replaceChildren(scenarioColumn);
+    return;
+  }
+
+  const eventColumn = document.createElement("div");
+  eventColumn.className = "scenario-column scenario-event-column";
+  const eventToolbar = document.createElement("div");
+  eventToolbar.className = "scenario-event-toolbar";
+  const backDetails = document.createElement("button");
+  backDetails.type = "button";
+  backDetails.className = "scenario-detail-back";
+  backDetails.textContent = "<<";
+  backDetails.setAttribute("aria-label", t("scenarioCloseDetails"));
+  backDetails.title = t("scenarioCloseDetails");
+  backDetails.addEventListener("click", () => {
+    selectedScenarioId = null;
+    closeScenarioPopover();
+    renderScenarioPanel();
+  });
+  const eventTitle = document.createElement("strong");
+  eventTitle.textContent = activeScenario.title || t("scenarioFolder");
+  eventToolbar.append(backDetails, eventTitle);
+  const eventList = document.createElement("div");
+  eventList.className = "scenario-scroll-list";
+  if (!activeScenario.events?.length) {
+    const empty = document.createElement("p");
+    empty.className = "scenario-empty";
+    empty.textContent = t("scenarioEventsEmpty");
+    eventList.append(empty);
+  }
+  (activeScenario.events || []).forEach((eventItem) => {
+    const row = document.createElement("article");
+    row.className = "scenario-event-item";
+    const title = document.createElement("strong");
+    title.textContent = eventItem.title || t("scenarioEventTitle");
+    const time = document.createElement("span");
+    time.className = "scenario-event-time";
+    time.textContent = eventItem.eventTime ? formatDateTimeValue(eventItem.eventTime) : "-";
+    const body = document.createElement("p");
+    body.textContent = eventItem.content || "";
+    const actions = document.createElement("div");
+    actions.className = "scenario-event-actions";
+    const edit = createScenarioIconButton({
+      className: "scenario-event-action-button",
+      icon: "edit",
+      label: `${eventItem.title} ${t("scenarioEdit")}`,
+      title: t("scenarioEdit"),
+      onClick: () => openScenarioPopover("event-edit", edit, { eventId: eventItem.id }),
+    });
+    const remove = createScenarioIconButton({
+      className: "scenario-event-action-button scenario-trash-button",
+      icon: "trash",
+      label: `${eventItem.title} ${t("scenarioDelete")}`,
+      title: t("scenarioDelete"),
+      onClick: () => deleteScenarioEvent(activeScenario.id, eventItem.id),
+    });
+    actions.append(edit, remove);
+    row.append(title, time, body, actions);
+    bindScenarioHighlight(row, activeScenario.id);
+    eventList.append(row);
+  });
+  const addEvent = document.createElement("button");
+  addEvent.id = "scenario-event-add-button";
+  addEvent.className = "scenario-inline-add";
+  addEvent.type = "button";
+  addEvent.textContent = "+";
+  addEvent.setAttribute("aria-label", t("scenarioAddEvent"));
+  addEvent.title = t("scenarioAddEvent");
+  addEvent.addEventListener("click", () => openScenarioPopover("event", addEvent));
+  eventList.append(addEvent);
+  eventColumn.append(eventToolbar, eventList);
+  workspace.classList.add("scenario-workspace-split");
+  workspace.replaceChildren(scenarioColumn, eventColumn);
+}
+
+function backtestScopeStatus(payload) {
+  const status = payload?.backtest?.leakage_audit_status || payload?.leakage_audit_status;
+  if (status === "post_artifact_cutoff") {
+    return { label: t("postCutoff"), severity: "active" };
+  }
+  if (status === "overlaps_artifact_sample_window") {
+    return { label: t("trainingOverlap"), severity: "warning" };
+  }
+  return { label: "", severity: "active" };
+}
+
 function updateBacktestControls() {
   const originValue = document.getElementById("backtest-origin-value");
-  const modeToggle = document.getElementById("backtest-mode-toggle");
   const chartPanel = document.querySelector(".chart-panel");
   const status = document.getElementById("backtest-status");
   if (originValue) {
     originValue.textContent = selectedBacktestTime ? toDisplayTime(selectedBacktestTime) : "-";
   }
-  if (modeToggle) {
-    const isLiveMode = chartMode !== "backtest";
-    const displayMode = isLiveMode ? "live" : "backtest";
-    modeToggle.checked = isLiveMode;
-    modeToggle.setAttribute("aria-checked", modeToggle.checked ? "true" : "false");
-    const shell = modeToggle.closest(".chart-mode-toggle");
-    shell?.setAttribute("data-disabled", "false");
-    chartPanel?.setAttribute("data-mode", displayMode);
-    document.body.dataset.chartMode = displayMode;
+  const displayMode = chartMode === "backtest" ? "backtest" : chartMode === "scenario" ? "scenario" : "live";
+  const segmented = document.querySelector(".chart-mode-segmented");
+  if (segmented) segmented.dataset.activeMode = displayMode;
+  document.querySelectorAll("[data-chart-mode-option]").forEach((button) => {
+    const active = button.dataset.chartModeOption === displayMode;
+    button.dataset.active = active ? "true" : "false";
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  chartPanel?.setAttribute("data-mode", displayMode);
+  document.body.dataset.chartMode = displayMode;
+  renderScenarioPanel();
+  if (displayMode !== "scenario") {
+    highlightedScenarioId = null;
+    renderScenarioChartLegend([]);
+    renderScenarioEventTokens();
   }
   if (chartMode === "backtest" && !activeBacktestPayload && !loadingState.backtest) {
     if (status?.dataset.severity !== "error") {
       setBacktestStatus(t("backtestClickGuide"), "guide");
     }
+  } else if (chartMode === "scenario" && !loadingState.scenario) {
+    setBacktestStatus(t("scenarioModeGuide"), "guide");
   } else if (chartMode !== "backtest" && !activeBacktestPayload && !loadingState.backtest) {
     setBacktestStatus("");
   }
@@ -2067,6 +3127,7 @@ function isBacktestModeRequested() {
 }
 
 function selectBacktestOrigin(time) {
+  if (!isBacktestModeRequested()) return;
   const candle = candleAtOrBefore(time);
   if (!candle) return;
   selectedBacktestTime = candle.time;
@@ -2109,6 +3170,11 @@ function applyChartSeriesLanguage() {
 function primaryForecastModel(payload) {
   const models = payload?.forecast_models || [];
   return models.find((model) => model.id === payload?.primary_model) || models.find((model) => model.id === "motif") || models[0] || null;
+}
+
+function forecastModelsForChart(payload) {
+  const base = payload?.forecast_models || [];
+  return chartMode === "scenario" ? [...base, ...activeScenarioModels()] : base;
 }
 
 function setLegendRows(rows) {
@@ -2167,8 +3233,10 @@ function updateLegendOnCrosshair(param) {
   if (!latestPayload) return;
   if (!param || !param.time) {
     refreshLegendDefault();
+    if (chartMode === "scenario") setHighlightedScenario(null);
     return;
   }
+  if (chartMode === "scenario") setHighlightedScenario(scenarioIdFromCrosshair(param));
 
   const seriesMap = param.seriesData || param.seriesPrices;
   const candle = seriesMap && typeof seriesMap.get === "function" ? seriesMap.get(candleSeriesRef) : null;
@@ -2445,6 +3513,7 @@ function resizeChartToContainer() {
   const height = Math.max(1, Math.round(container.clientHeight || 460));
   chartRef.applyOptions({ width, height });
   positionNewsMarkers();
+  positionScenarioEventTokens();
   scheduleForecastSegmentLabelPositioning();
 }
 
@@ -2625,6 +3694,7 @@ function ensureChart() {
   if (timeScale && typeof timeScale.subscribeVisibleLogicalRangeChange === "function") {
     timeScale.subscribeVisibleLogicalRangeChange(() => {
       positionNewsMarkers();
+      positionScenarioEventTokens();
       scheduleForecastSegmentLabelPositioning();
     });
   }
@@ -2636,7 +3706,11 @@ function ensureChart() {
   if (!isClickBound && typeof chartRef.subscribeClick === "function") {
     chartRef.subscribeClick((param) => {
       if (param?.time) {
-        selectBacktestOrigin(param.time);
+        if (chartMode === "backtest") {
+          selectBacktestOrigin(param.time);
+        } else if (chartMode === "scenario") {
+          selectScenarioEventTimeFromChart(param.time);
+        }
       }
     });
     isClickBound = true;
@@ -2687,6 +3761,41 @@ function setInitialForecastView(payload) {
 
 function setModelOverlayLegend(models) {
   void models;
+}
+
+function renderScenarioChartLegend(models) {
+  const root = document.getElementById("scenario-chart-legend");
+  if (!root) return;
+  const scenarioModels = chartMode === "scenario" ? (models || []) : [];
+  if (!scenarioModels.length) {
+    root.replaceChildren();
+    root.classList.add("hidden");
+    return;
+  }
+  const items = scenarioModels.map((model) => {
+    const item = document.createElement("span");
+    item.className = "scenario-chart-legend-item";
+    item.tabIndex = 0;
+    const scenario = scenarioItemFromModelId(model.id);
+    if (scenario) item.dataset.scenarioId = scenario.id;
+    item.style.setProperty("--scenario-color", model.color || "#c084fc");
+    bindScenarioHighlight(item, () => {
+      const nextScenario = scenarioItemFromModelId(model.id);
+      return nextScenario?.id || null;
+    });
+    const dot = document.createElement("i");
+    dot.setAttribute("aria-hidden", "true");
+    const label = document.createElement("strong");
+    label.textContent = model.label || model.id || t("scenarioFolder");
+    const title = document.createElement("span");
+    title.textContent = model.description || "";
+    item.append(dot, label, title);
+    return item;
+  });
+  root.replaceChildren(...items);
+  root.classList.remove("hidden");
+  applyScenarioHighlight();
+  renderScenarioEventTokens();
 }
 
 function rebuildForecastLookup(models) {
@@ -2769,11 +3878,16 @@ function renderForecastModelSeries(models) {
 
   overlays.forEach((model) => {
     let series = forecastModelSeriesRefs.get(model.id);
+    const scenario = scenarioItemFromModelId(model.id);
+    const dimmed = scenario && highlightedScenarioId && highlightedScenarioId !== scenario.id;
+    const focused = scenario && highlightedScenarioId && highlightedScenarioId === scenario.id;
+    const modelColor = dimmed ? colorWithAlpha(model.color || "#8b949e", 0.22) : model.color || "#8b949e";
+    const modelLineWidth = focused ? 3.4 : dimmed ? 1.1 : String(model.id || "").startsWith("scenario_") ? 2.2 : model.id === "ensemble" ? 2 : 1.4;
     if (!series) {
       series = createLineSeriesRef({
         title: "",
-        color: model.color || "#8b949e",
-        lineWidth: model.id === "ensemble" ? 2 : 1.4,
+        color: modelColor,
+        lineWidth: modelLineWidth,
         lineStyle: lineStyle.Dotted !== undefined ? lineStyle.Dotted : 1,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -2782,8 +3896,8 @@ function renderForecastModelSeries(models) {
     } else if (typeof series.applyOptions === "function") {
       series.applyOptions({
         title: "",
-        color: model.color || "#8b949e",
-        lineWidth: model.id === "ensemble" ? 2 : 1.4,
+        color: modelColor,
+        lineWidth: modelLineWidth,
         lineStyle: lineStyle.Dotted !== undefined ? lineStyle.Dotted : 1,
         priceLineVisible: false,
         lastValueVisible: false,
@@ -2796,10 +3910,9 @@ function renderForecastModelSeries(models) {
 function renderChart(payload, resetView = false, options = {}) {
   ensureChart();
   const isBacktest = options.mode === "backtest";
+  const isScenario = options.mode === "scenario";
   if (!isBacktest) {
-    chartMode = "live";
-    activeBacktestPayload = null;
-    activeBacktestOriginMarker = null;
+    chartMode = isScenario ? "scenario" : "live";
     latestLivePayload = payload;
     if (backtestActualSeriesRef) {
       backtestActualSeriesRef.setData([]);
@@ -2808,10 +3921,12 @@ function renderChart(payload, resetView = false, options = {}) {
   }
   latestPayload = payload;
   setChartDataWarning(payload.data_status);
-  const visibleModels = visibleForecastModels(payload.forecast_models || []);
+  const chartModels = forecastModelsForChart(payload);
+  const visibleModels = visibleForecastModels(chartModels);
   predictedByTime = new Map((payload.predicted || []).map((p) => [String(p.time), p.value]));
   rebuildForecastLookup(visibleModels);
-  setModelOverlayLegend(payload.forecast_models || []);
+  setModelOverlayLegend(chartModels);
+  renderScenarioChartLegend(visibleModels);
   const timeScale = chartRef.timeScale();
   const savedRange =
     !resetView && typeof timeScale.getVisibleLogicalRange === "function"
@@ -2873,7 +3988,12 @@ function renderChart(payload, resetView = false, options = {}) {
   scheduleForecastSegmentLabelPositioning();
 }
 
-function renderBacktestChart(payload, savedRange = null) {
+function renderScenarioOverlays() {
+  if (chartMode !== "scenario" || !latestLivePayload) return;
+  renderChart(latestLivePayload, false, { mode: "scenario" });
+}
+
+function renderBacktestChart(payload, savedRange = null, options = {}) {
   chartMode = "backtest";
   activeBacktestPayload = payload;
   activeBacktestOriginMarker = {
@@ -2883,16 +4003,19 @@ function renderBacktestChart(payload, savedRange = null) {
     shape: "circle",
     text: t("origin"),
   };
-  renderChart(payload, false, { mode: "backtest" });
-  if (savedRange && typeof chartRef.timeScale().setVisibleLogicalRange === "function") {
+  const resetView = options.resetView === true;
+  renderChart(payload, resetView, { mode: "backtest" });
+  if (!resetView && savedRange && typeof chartRef.timeScale().setVisibleLogicalRange === "function") {
     chartRef.timeScale().setVisibleLogicalRange(savedRange);
     scheduleForecastSegmentLabelPositioning();
   }
-  setBacktestStatus(`${t("actual")} ${payload.backtest?.actual_future_rows || 0}/${payload.backtest?.horizon || 0}`, "active");
+  const scope = backtestScopeStatus(payload);
+  const actualText = `${t("actual")} ${payload.backtest?.actual_future_rows || 0}/${payload.backtest?.horizon || 0}`;
+  setBacktestStatus(scope.label ? `${actualText} · ${scope.label}` : actualText, scope.severity);
   updateBacktestControls();
 }
 
-async function runSelectedBacktest() {
+async function runSelectedBacktest(options = {}) {
   chartMode = "backtest";
   if (!selectedBacktestTime) {
     setBacktestStatus(t("backtestClickGuide"), "guide");
@@ -2909,17 +4032,20 @@ async function runSelectedBacktest() {
   const interval = currentInterval();
   const horizon = currentHorizon();
   const selectedModels = forecastModelsQuery();
+  const preserveRange = options.preserveRange !== false;
   const savedRange =
+    preserveRange &&
     chartRef && typeof chartRef.timeScale().getVisibleLogicalRange === "function"
       ? chartRef.timeScale().getVisibleLogicalRange()
       : null;
   setBacktestStatus(t("loading"), "loading");
   setLoadingState("backtest", true);
+  setBlockingRefresh(true);
   try {
     const payload = await loadBacktestVisualization(symbol, interval, originTime, selectedModels, horizon);
     if (backtestReqId !== backtestRequestVersion || String(selectedBacktestTime) !== String(originTime)) return;
-    renderBacktestChart(payload, savedRange);
-    refreshDashboardPanels(symbol, interval, selectedModels, horizon, requestVersion, {
+    renderBacktestChart(payload, savedRange, { resetView: !preserveRange });
+    const panelsPromise = refreshDashboardPanels(symbol, interval, selectedModels, horizon, requestVersion, {
       forceContext: true,
       forceCommentary: true,
       forceReport: true,
@@ -2929,6 +4055,7 @@ async function runSelectedBacktest() {
     setDataStatusBadge(payload.data_status);
     setForecastBadges(payload);
     setForecastNotices(payload);
+    await panelsPromise;
   } catch (error) {
     if (backtestReqId !== backtestRequestVersion) return;
     console.error(error);
@@ -2936,17 +4063,54 @@ async function runSelectedBacktest() {
   } finally {
     if (backtestReqId === backtestRequestVersion) {
       setLoadingState("backtest", false);
+      setBlockingRefresh(false);
       updateBacktestControls();
     }
   }
 }
 
-function exitBacktestMode() {
+function enterScenarioMode() {
+  chartMode = "scenario";
+  backtestRequestVersion += 1;
+  setLoadingState("backtest", false);
+  setBlockingRefresh(false);
+  ensureChart();
+  resizeChartToContainer();
+  if (backtestActualSeriesRef) {
+    backtestActualSeriesRef.setData([]);
+  }
+  closeNewsPopover();
+  updateBacktestControls();
+  if (latestLivePayload) {
+    renderChart(latestLivePayload, false, { mode: "scenario" });
+    return;
+  }
+  initDashboard(currentOilSymbol(), currentInterval(), { force: true });
+}
+
+function initialBacktestOriginFromUrl() {
+  const params = new URLSearchParams(window.location.search || "");
+  const raw = params.get("backtest_origin") || params.get("origin_time");
+  return raw ? toUnixTime(raw) : null;
+}
+
+async function runInitialBacktestFromUrl() {
+  const origin = initialBacktestOriginFromUrl();
+  if (origin === null) return;
+  chartMode = "backtest";
+  selectedBacktestTime = origin;
+  activeBacktestPayload = null;
+  activeBacktestOriginMarker = null;
+  updateBacktestControls();
+  await runSelectedBacktest({ preserveRange: false });
+}
+
+function enterLiveMode() {
   chartMode = "live";
   backtestRequestVersion += 1;
   setLoadingState("backtest", false);
-  activeBacktestPayload = null;
-  activeBacktestOriginMarker = null;
+  setBlockingRefresh(true);
+  closeScenarioPopover();
   latestContextPayload = null;
   latestCommentaryPayload = null;
   latestReportPayload = null;
@@ -2958,13 +4122,49 @@ function exitBacktestMode() {
   closeNewsPopover();
   renderNewsTimeline(null);
   setBacktestStatus("");
-  if (latestPayload) {
-    const symbol = currentOilSymbol();
-    const interval = currentInterval();
-    activeDataKey = null;
-    initDashboard(symbol, interval, { force: true });
+  activeDataKey = null;
+  updateBacktestControls();
+  initDashboard(currentOilSymbol(), currentInterval(), { force: true }).finally(() => setBlockingRefresh(false));
+}
+
+function enterBacktestMode() {
+  chartMode = "backtest";
+  const hasBasePayload = Boolean(latestLivePayload || latestPayload);
+  const waitingForInitialChart = !hasBasePayload && (chartRequestInFlight || loadingState.chart);
+  setLoadingState("chart", waitingForInitialChart);
+  setBlockingRefresh(false);
+  closeScenarioPopover();
+  renderScenarioChartLegend([]);
+  ensureChart();
+  resizeChartToContainer();
+  if (latestLivePayload && !activeBacktestPayload) {
+    renderChart(latestLivePayload, false, { mode: "backtest" });
+  } else if (latestPayload && !activeBacktestPayload) {
+    renderChart(latestPayload, false, { mode: "backtest" });
   }
   updateBacktestControls();
+  if (!hasBasePayload && !chartRequestInFlight) {
+    void initDashboard(currentOilSymbol(), currentInterval(), { force: true });
+    return;
+  }
+  if (waitingForInitialChart) return;
+  if (activeBacktestPayload) {
+    renderBacktestChart(activeBacktestPayload, null, { resetView: false });
+    void refreshDashboardPanels(currentOilSymbol(), currentInterval(), forecastModelsQuery(), currentHorizon(), requestVersion, {
+      forceContext: true,
+      forceCommentary: true,
+      forceReport: true,
+      originTime: selectedBacktestTime || activeBacktestPayload.origin_time,
+    });
+    return;
+  }
+  if (selectedBacktestTime) {
+    void runSelectedBacktest();
+  }
+}
+
+function exitBacktestMode() {
+  enterLiveMode();
 }
 
 function refreshDashboardPanels(symbol, interval, selectedModels, selectedHorizon, reqId = requestVersion, options = {}) {
@@ -2987,7 +4187,7 @@ function refreshDashboardPanels(symbol, interval, selectedModels, selectedHorizo
     renderContextMarkers(matchingAnalysisPayload ? latestContextPayload : null);
     renderModelCommentary(matchingAnalysisPayload ? latestCommentaryPayload : null);
     renderForecastReport(matchingAnalysisPayload ? latestReportPayload : null);
-    return;
+    return Promise.resolve();
   }
 
   if (analysisRequestInFlight) {
@@ -3009,7 +4209,9 @@ function refreshDashboardPanels(symbol, interval, selectedModels, selectedHorizo
     renderModelCommentaryLoading();
     renderForecastReportLoading();
     renderContextMarkers(null);
-    return;
+    return new Promise((resolve) => {
+      pendingAnalysisRefresh.resolve = resolve;
+    });
   }
 
   lastAnalysisKey = analysisKey;
@@ -3032,7 +4234,7 @@ function refreshDashboardPanels(symbol, interval, selectedModels, selectedHorizo
   renderMarketContextLoading();
   renderModelCommentaryLoading();
   renderForecastReportLoading();
-  loadDashboardAnalysis(symbol, interval, selectedModels, selectedHorizon, originTime, languageAtRequest)
+  return loadDashboardAnalysis(symbol, interval, selectedModels, selectedHorizon, originTime, languageAtRequest)
     .then((analysis) => {
       if (analysisReqId !== activeAnalysisRequestId || !isDashboardAnalysisRequestCurrent(analysisKey, languageAtRequest, reqId)) return;
       latestAnalysisPayloadKey = analysisKey;
@@ -3083,7 +4285,7 @@ function refreshDashboardPanels(symbol, interval, selectedModels, selectedHorizo
           currentLanguage,
         ) === currentDashboardAnalysisKey()
       ) {
-        refreshDashboardPanels(
+        const pendingPromise = refreshDashboardPanels(
           pending.symbol,
           pending.interval,
           pending.selectedModels,
@@ -3091,6 +4293,9 @@ function refreshDashboardPanels(symbol, interval, selectedModels, selectedHorizo
           pending.reqId,
           pending.options,
         );
+        if (typeof pending.resolve === "function") pendingPromise.finally(pending.resolve);
+      } else if (pending && typeof pending.resolve === "function") {
+        pending.resolve();
       }
     });
 }
@@ -3099,6 +4304,9 @@ async function initDashboard(symbol, interval, options = {}) {
   if (chartRequestInFlight && !options.force) return;
   chartRequestInFlight = true;
   setLoadingState("chart", true);
+  ensureChart();
+  resizeChartToContainer();
+  window.requestAnimationFrame(resizeChartToContainer);
   const reqId = ++requestVersion;
   const selectedHorizon = currentHorizon();
   await loadModelCatalog(interval, selectedHorizon);
@@ -3121,11 +4329,14 @@ async function initDashboard(symbol, interval, options = {}) {
     setDataStatusBadge(payload.data_status);
     setForecastBadges(payload);
     setForecastNotices(payload);
-    refreshDashboardPanels(canonicalSymbol, interval, selectedModels, selectedHorizon, reqId);
+    const panelsPromise = refreshDashboardPanels(canonicalSymbol, interval, selectedModels, selectedHorizon, reqId);
     try {
       const nextDataKey = `${payload.symbol_input}|${payload.interval_resolved}`;
       const shouldResetView = activeDataKey !== nextDataKey;
-      renderChart(payload, shouldResetView);
+      const renderMode =
+        chartMode === "scenario" ? "scenario" : chartMode === "backtest" ? "backtest" : "live";
+      if (renderMode === "backtest") latestLivePayload = payload;
+      renderChart(payload, shouldResetView, renderMode === "live" ? {} : { mode: renderMode });
       activeDataKey = nextDataKey;
     } catch (chartError) {
       console.error(chartError);
@@ -3133,6 +4344,7 @@ async function initDashboard(symbol, interval, options = {}) {
       if (updated) updated.textContent = `${formatDateTimeValue(payload.updated_at)} (chart render failed)`;
       setStatus(`차트 렌더링 실패: ${chartError?.message || "브라우저 콘솔을 확인하세요."}`, "error");
     }
+    await panelsPromise;
   } catch (error) {
     if (reqId !== requestVersion) return;
     console.error(error);
@@ -3150,7 +4362,7 @@ async function initDashboard(symbol, interval, options = {}) {
 function bindControls() {
   const languageToggle = document.getElementById("language-toggle");
   const languageToggleShell = document.querySelector(".language-mode-toggle");
-  const backtestModeToggle = document.getElementById("backtest-mode-toggle");
+  const chartModeButtons = document.querySelectorAll("[data-chart-mode-option]");
   const reportButton = document.getElementById("report-download-button");
   const triggerSearch = () => {
     const symbol = currentOilSymbol();
@@ -3168,11 +4380,9 @@ function bindControls() {
     // Force new chart request even for same symbol/interval.
     activeDataKey = null;
     chartMode = "live";
-    selectedBacktestTime = null;
-    activeBacktestPayload = null;
-    activeBacktestOriginMarker = null;
     backtestRequestVersion += 1;
     setLoadingState("backtest", false);
+    setBlockingRefresh(true);
     latestContextPayload = null;
     latestCommentaryPayload = null;
     latestReportPayload = null;
@@ -3192,29 +4402,35 @@ function bindControls() {
     renderModelCommentaryLoading();
     setBacktestStatus("");
     updateBacktestControls();
-    initDashboard(symbol, interval, { force: true });
+    initDashboard(symbol, interval, { force: true }).finally(() => setBlockingRefresh(false));
   };
 
-  backtestModeToggle?.addEventListener("change", () => {
-    if (backtestModeToggle.checked) {
-      exitBacktestMode();
-      return;
-    }
-    requestVersion += 1;
-    chartMode = "backtest";
-    activeBacktestPayload = null;
-    activeBacktestOriginMarker = null;
-    clearDashboardAnalysisPanels();
-    lastAnalysisKey = "";
-    analysisRequestVersion += 1;
-    pendingAnalysisRefresh = null;
-    updateBacktestControls();
-    void runSelectedBacktest();
+  chartModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.chartModeOption || "live";
+      if (nextMode === "live") {
+        enterLiveMode();
+        return;
+      }
+      if (nextMode === "scenario") {
+        enterScenarioMode();
+        return;
+      }
+      enterBacktestMode();
+    });
   });
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (target && !target.closest("#news-detail-popover") && !target.closest(".chart-news-marker")) {
       closeNewsPopover();
+    }
+    if (
+      target &&
+      !target.closest("#scenario-popover") &&
+      !target.closest(".scenario-inline-add") &&
+      !target.closest(".scenario-icon-button")
+    ) {
+      closeScenarioPopover();
     }
   });
   reportButton?.addEventListener("click", printForecastReportPdf);
@@ -3242,7 +4458,7 @@ function startAutoRefresh() {
     clearInterval(refreshTimer);
   }
   refreshTimer = setInterval(() => {
-    if (chartMode === "backtest" || activeBacktestPayload) return;
+    if (chartMode !== "live") return;
     const symbol = currentOilSymbol();
     const interval = currentInterval();
     initDashboard(symbol, interval, { force: false });
@@ -3252,11 +4468,12 @@ function startAutoRefresh() {
 async function bootDashboard() {
   bindControls();
   await loadModelCatalog(currentInterval(), currentHorizon());
-  initDashboard(
+  await initDashboard(
     currentOilSymbol(),
     currentInterval(),
     { force: true },
   );
+  await runInitialBacktestFromUrl();
   startAutoRefresh();
 }
 

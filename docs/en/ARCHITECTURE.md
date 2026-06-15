@@ -56,6 +56,7 @@ The LLM does not generate numeric forecast paths.
 - `/api/chart`: legacy chart compatibility contract
 - `/api/market-context`: news/context markers and scenario commentary
 - `/api/dashboard-analysis`: one external LLM call for AI commentary, news interpretation, and forecast report prose
+- `/api/scenarios/forecast`: converts user-entered future events into event-context overrides and scenario forecasts
 - `/api/backtests/visualization`: forecast overlay and realized future candles from a historical origin
 - `/api/explanation`: forecast explanation
 - `/api/models`, `/api/data-status`, `/api/backtests`: operational/diagnostic endpoints

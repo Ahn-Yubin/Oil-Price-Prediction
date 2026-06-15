@@ -56,6 +56,9 @@ LLM은 이 프로젝트에서 숫자 가격 예측기가 아니라 시장 뉴스
 10. `/api/assistant-chat`은 사용자가 직접 입력한 짧은 질문에 답합니다.
     이 endpoint도 숫자 가격 예측을 새로 만들지 않습니다. 화면에서는 답변 생성 중 assistant 말풍선의 점 애니메이션을 표시하고, 요청 중복 submit을 막습니다.
 
+11. `/api/scenarios/forecast`는 사용자가 입력한 미래 사건 묶음을 구조화 context로 바꿉니다.
+    Scenario mode의 제목/내용/발생 시점은 외부 LLM context encoder에 들어가며, LLM은 가격 숫자 대신 사건 종류, 방향성, 영향도, 불확실성, event embedding만 반환합니다. Backend는 이 결과와 각 이벤트의 `event_time`을 사용해 forecast horizon별 event-context schedule을 만들고, 해당 horizon까지 발생한 이벤트만 활성화한 `event_context_frame`을 `oil_context_fusion`에 넣습니다. 미래 사건 시각은 `scenario_event_time`, `model_context_schedule` 메타데이터와 LLM 입력에 남지만, 미래 가격이나 실현 수익률은 모델 입력에 들어가지 않습니다.
+
 ## 허용되는 역할
 
 - 뉴스, 경제 이벤트, 수급 이벤트를 구조화된 market context로 변환합니다.
@@ -64,6 +67,7 @@ LLM은 이 프로젝트에서 숫자 가격 예측기가 아니라 시장 뉴스
 - `oil_context_fusion`에서 gating, confidence, uncertainty에 간접적으로 영향을 줍니다.
 - `/api/market-context`에서 과거 context marker와 시나리오 해설을 제공합니다.
 - `/api/dashboard-analysis`에서 이미 계산된 forecast와 뉴스 evidence를 바탕으로 시황/뉴스/리포트 문장을 작성합니다.
+- `/api/scenarios/forecast`에서 사용자 입력 미래 사건을 구조화 event context로 바꿉니다.
 
 ## 금지되는 역할
 
@@ -96,6 +100,7 @@ export LLM_CONTEXT_MODE=google_generative
 export LLM_API_KEY="YOUR_GOOGLE_API_KEY"
 export LLM_API_BASE="https://generativelanguage.googleapis.com/v1beta"
 export LLM_MODEL="gemma-3-27b-it"
+export LLM_REQUEST_TIMEOUT_SECONDS=45
 ```
 
 `LLM_MODEL`은 Google AI Studio 또는 model list에서 실제로 표시되는 모델 ID를 사용합니다. “Gemma 4”라는 이름을 UI에서 봤더라도 API model id가 `gemma4`라는 뜻은 아닙니다. Google OpenAI-compatible endpoint는 Gemini model 예시가 중심이고, Gemma hosted API는 `models/{model}:generateContent` native endpoint를 사용합니다.

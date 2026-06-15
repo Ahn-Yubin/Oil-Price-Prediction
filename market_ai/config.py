@@ -43,6 +43,7 @@ class Settings(BaseModel):
     llm_api_key: str | None = Field(default=None)
     llm_model: str = Field(default="context-encoder-placeholder")
     llm_api_base: str = Field(default="https://api.openai.com/v1/chat/completions")
+    llm_request_timeout_seconds: float = Field(default=45.0)
     local_llm_api_base: str = Field(default="http://localhost:11434/api/chat")
     local_llm_model: str = Field(default="local-context-encoder")
     llm_context_mode: str = Field(default="google_generative")
@@ -61,6 +62,11 @@ class Settings(BaseModel):
     @classmethod
     def positive_stale_threshold(cls, value: int) -> int:
         return max(1, int(value))
+
+    @field_validator("llm_request_timeout_seconds")
+    @classmethod
+    def positive_llm_timeout(cls, value: float) -> float:
+        return max(1.0, float(value))
 
     @property
     def is_development(self) -> bool:
@@ -98,6 +104,7 @@ class Settings(BaseModel):
             llm_api_key=source.get("LLM_API_KEY") or None,
             llm_model=source.get("LLM_MODEL", "context-encoder-placeholder"),
             llm_api_base=source.get("LLM_API_BASE", "https://api.openai.com/v1/chat/completions"),
+            llm_request_timeout_seconds=float(source.get("LLM_REQUEST_TIMEOUT_SECONDS", "45")),
             local_llm_api_base=source.get("LOCAL_LLM_API_BASE", "http://localhost:11434/api/chat"),
             local_llm_model=source.get("LOCAL_LLM_MODEL", "local-context-encoder"),
             llm_context_mode=source.get("LLM_CONTEXT_MODE", "google_generative"),

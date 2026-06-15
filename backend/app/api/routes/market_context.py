@@ -49,7 +49,8 @@ _MARKET_CONTEXT_CACHE_TTL_SECONDS = 300
 _LLM_CALL_WINDOW_SECONDS = 60
 _LLM_CALL_LIMIT_PER_WINDOW = 12
 _MODEL_COMMENTARY_PROMPT_VERSION = "external-required-v3"
-_DASHBOARD_ANALYSIS_PROMPT_VERSION = "combined-panels-v4"
+_DASHBOARD_ANALYSIS_PROMPT_VERSION = "split-panels-v1"
+_DASHBOARD_ANALYSIS_PANEL_COUNT = 3
 _NON_PUBLIC_CONTEXT_FRAGMENTS = (
     "deterministic local event context encoder",
     "structured context only",
@@ -576,14 +577,19 @@ def _symbol_payload(bundle) -> dict[str, str]:
     }
 
 
-def _reserve_llm_call() -> bool:
+def _reserve_llm_calls(count: int = 1) -> bool:
     now = time.time()
     cutoff = now - _LLM_CALL_WINDOW_SECONDS
     _LLM_CALL_TIMESTAMPS[:] = [stamp for stamp in _LLM_CALL_TIMESTAMPS if stamp >= cutoff]
-    if len(_LLM_CALL_TIMESTAMPS) >= _LLM_CALL_LIMIT_PER_WINDOW:
+    requested = max(1, int(count))
+    if len(_LLM_CALL_TIMESTAMPS) + requested > _LLM_CALL_LIMIT_PER_WINDOW:
         return False
-    _LLM_CALL_TIMESTAMPS.append(now)
+    _LLM_CALL_TIMESTAMPS.extend([now] * requested)
     return True
+
+
+def _reserve_llm_call() -> bool:
+    return _reserve_llm_calls(1)
 
 
 def _commentary_cache_key(bundle, model_summaries: list[dict[str, Any]], origin_time: str | None, language: str) -> str:
@@ -625,6 +631,10 @@ def _extract_commentary_json(raw: str) -> dict[str, Any]:
     return parsed
 
 
+def _llm_request_timeout_seconds(settings) -> float:
+    return max(1.0, float(getattr(settings, "llm_request_timeout_seconds", 45.0)))
+
+
 def _google_model_commentary(settings, prompt: str) -> dict[str, Any]:
     base = settings.llm_api_base.strip().rstrip("/")
     if "openai" in base or "chat/completions" in base:
@@ -646,7 +656,7 @@ def _google_model_commentary(settings, prompt: str) -> dict[str, Any]:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=20.0, context=_default_https_context()) as response:
+    with urllib.request.urlopen(request, timeout=_llm_request_timeout_seconds(settings), context=_default_https_context()) as response:
         body = json.loads(response.read().decode("utf-8"))
     parts = body["candidates"][0]["content"]["parts"]
     content = "".join(str(part.get("text", "")) for part in parts if not part.get("thought"))
@@ -672,7 +682,7 @@ def _openai_compatible_model_commentary(settings, prompt: str) -> dict[str, Any]
         headers={"Authorization": f"Bearer {settings.llm_api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=20.0, context=_default_https_context()) as response:
+    with urllib.request.urlopen(request, timeout=_llm_request_timeout_seconds(settings), context=_default_https_context()) as response:
         body = json.loads(response.read().decode("utf-8"))
     return _extract_commentary_json(body["choices"][0]["message"]["content"])
 
@@ -1338,6 +1348,9 @@ def _dashboard_report_from_llm(
     lang = _language(language)
     if not isinstance(raw_report, dict):
         raw_report = {}
+    executive_summary = str(raw_report.get("executive_summary") or "").strip()
+    if not executive_summary:
+        raise ValueError("LLM dashboard report response missing executive_summary.")
     sections: list[ReportSection] = []
     for item in raw_report.get("sections") or []:
         if not isinstance(item, dict):
@@ -1348,12 +1361,7 @@ def _dashboard_report_from_llm(
             continue
         sections.append(ReportSection(title=title, body=body, bullets=_string_list(item.get("bullets"))[:3]))
     if not sections:
-        sections = [
-            ReportSection(
-                title="핵심 전망" if lang == "ko" else "Core View",
-                body=str(raw_report.get("executive_summary") or "").strip() or ("리포트를 생성하지 못했습니다." if lang == "ko" else "Report unavailable."),
-            )
-        ]
+        raise ValueError("LLM dashboard report response missing sections.")
     report = ForecastReport(
         generated_at=generated_at,
         symbol=bundle.response.symbol,
@@ -1362,13 +1370,12 @@ def _dashboard_report_from_llm(
         mode="llm_dashboard_report",
         llm_used=True,
         source_note=(
-            "외부 LLM을 한 번 호출해 시황, 뉴스 해석, 리포트 문장을 함께 작성했습니다. 숫자는 제공된 모델 출력만 사용했습니다."
+            "외부 LLM을 패널별로 호출해 리포트 문장을 작성했습니다. 숫자는 제공된 모델 출력만 사용했습니다."
             if lang == "ko"
-            else "One external LLM call generated commentary, news interpretation, and report prose together. Numeric values come only from supplied model outputs."
+            else "Separate external LLM panel calls generated the report prose. Numeric values come only from supplied model outputs."
         ),
         title=str(raw_report.get("title") or forecast_facts.get("title") or ""),
-        executive_summary=str(raw_report.get("executive_summary") or "").strip()
-        or ("LLM 리포트 요약을 받지 못했습니다." if lang == "ko" else "LLM report summary unavailable."),
+        executive_summary=executive_summary,
         recommendation_note=str(raw_report.get("recommendation_note") or "").strip(),
         key_metrics=dict(forecast_facts.get("key_metrics") or {}),
         sections=sections,
@@ -1417,6 +1424,12 @@ def _normalize_dashboard_analysis(
     commentary_raw = raw.get("commentary") if isinstance(raw.get("commentary"), dict) else {}
     news_raw = raw.get("news_context") if isinstance(raw.get("news_context"), dict) else {}
     report_raw = raw.get("report") if isinstance(raw.get("report"), dict) else {}
+    commentary_summary = str(commentary_raw.get("summary") or "").strip()
+    commentary_interpretation = str(commentary_raw.get("model_interpretation") or "").strip()
+    if not commentary_summary or not commentary_interpretation:
+        raise ValueError("LLM dashboard commentary response missing required text.")
+    if not str(news_raw.get("summary") or "").strip():
+        raise ValueError("LLM dashboard news response missing summary.")
     normalized_market_context = _dashboard_market_context_from_llm(market_context_payload, news_raw)
     commentary = {
         "symbol": bundle.response.symbol,
@@ -1424,8 +1437,8 @@ def _normalize_dashboard_analysis(
         "interval": bundle.response.interval,
         "generated_at": generated_at.isoformat(),
         "mode": "llm_dashboard_commentary",
-        "summary": str(commentary_raw.get("summary") or ""),
-        "model_interpretation": str(commentary_raw.get("model_interpretation") or ""),
+        "summary": commentary_summary,
+        "model_interpretation": commentary_interpretation,
         "model_agreement": "",
         "divergence": "",
         "risk_notes": _string_list(commentary_raw.get("risk_notes"))[:4],
@@ -1476,7 +1489,7 @@ def _llm_dashboard_analysis(
             status_code=503,
             detail={"message": _llm_unavailable_message("not_configured", lang), "warnings": []},
         )
-    if not _reserve_llm_call():
+    if not _reserve_llm_calls(_DASHBOARD_ANALYSIS_PANEL_COUNT):
         raise HTTPException(
             status_code=503,
             detail={"message": _llm_unavailable_message("rate_guard", lang), "warnings": []},
@@ -1487,10 +1500,32 @@ def _llm_dashboard_analysis(
     output_language = "English" if lang == "en" else "Korean"
     reference_time_label = _dashboard_reference_time_label(origin_time)
     analysis_mode = "point_in_time_backtest" if origin_time else "live"
+    shared_rules = [
+        "Use only supplied numeric forecast facts. Do not invent new price targets or paths.",
+        "Do not write trading instructions or investment advice.",
+        "Do not expose internal model ids, adapters, features, scores, calibration, coverage, quantile, residual, or data-status jargon.",
+        "If Korean is requested, translate or paraphrase English news headlines. Do not quote English headlines verbatim.",
+        "Never output deterministic/local encoder placeholder text or say that direct headlines are insufficient.",
+        "Treat the forecast as model output to explain, not as a recommendation.",
+        "Use the same key drivers, reference-time phrasing, and analyst voice as the other dashboard panels.",
+        "For Korean output, always use polite user-facing endings such as -습니다, -합니다, -입니다, -됩니다. Do not use terse report endings such as 국면이다, 전망된다, 유지한다, 보인다.",
+    ]
+    if origin_time:
+        shared_rules.extend(
+            [
+                "Write as of reference_time_label and avoid relative live-market words such as current, currently, recent, now, today, 현재, 최근, 지금, 금일.",
+                "The first sentence must explicitly include reference_time_label when the panel has a summary or executive_summary.",
+            ]
+        )
     prompt_context = {
         "language": output_language,
         "analysis_mode": analysis_mode,
         "reference_time_label": reference_time_label,
+        "shared_voice": {
+            "role": "oil market analyst",
+            "tone": "calm, concise, user-facing, consistent across commentary, news interpretation, and report panels",
+            "korean_style": "존댓말 설명체",
+        },
         "symbol": bundle.response.symbol,
         "display_symbol": _display_symbol(bundle),
         "interval": bundle.response.interval,
@@ -1510,56 +1545,65 @@ def _llm_dashboard_analysis(
         },
         "news_evidence": _dashboard_news_evidence(market_context_payload, limit=8),
         "context_evidence": _dashboard_context_evidence(market_context_payload, limit=5),
-        "rules": [
-            "Use only supplied numeric forecast facts. Do not invent new price targets or paths.",
-            "Do not write trading instructions or investment advice.",
-            "Do not expose internal model ids, adapters, features, scores, calibration, coverage, quantile, residual, or data-status jargon.",
-            "If Korean is requested, translate or paraphrase English news headlines. Do not quote English headlines verbatim.",
-            "news_context.summary must not be copied verbatim into news_context.context_points explanations.",
-            "Never output deterministic/local encoder placeholder text or say that direct headlines are insufficient.",
-            "Treat the forecast as model output to explain, not as a recommendation.",
-            "If analysis_mode is point_in_time_backtest, write as of reference_time_label and avoid relative live-market words such as current, currently, recent, now, today, 현재, 최근, 지금, 금일.",
-            "For Korean output, always use polite user-facing endings such as -습니다, -합니다, -입니다, -됩니다. Do not use terse report endings such as 국면이다, 전망된다, 유지한다, 보인다.",
-            "If analysis_mode is point_in_time_backtest, the first sentence of commentary.summary and report.executive_summary must explicitly include reference_time_label.",
-        ],
+        "rules": shared_rules,
     }
-    prompt = (
-        "너는 원유 시장 전담 애널리스트이며, 원유 예측 대시보드의 세 패널 문안을 한 번에 작성한다. "
-        "한 번의 응답으로 시황 해설, 뉴스 해석, 예측 리포트를 모두 채울 JSON을 작성한다. "
-        f"모든 사용자 표시 문장은 반드시 {output_language}로 작성하라. "
-        "숫자는 제공된 forecast_facts만 사용하고 새 숫자 예측을 만들지 마라. "
-        "가격 목표를 새로 만들거나 매매 지시를 쓰지 말고, 제공된 예측 경로와 뉴스 맥락을 사용자용 문장으로 해석하라. "
-        "analysis_mode가 point_in_time_backtest이면 백테스트 기준 시점 보고서로 작성하고, reference_time_label의 절대 날짜/시각을 기준으로 서술하라. "
-        "이 경우 현재, 최근, 지금, 금일, current, currently, recent, now, today 같은 라이브 시황 표현을 쓰지 마라. "
-        "한국어 응답은 반드시 사용자에게 설명하는 존댓말로 작성하라. 문장 끝은 -습니다, -합니다, -입니다, -됩니다처럼 마무리하고, 국면이다/전망된다/유지한다/보인다 같은 딱딱한 보고서체를 쓰지 마라. "
-        "analysis_mode가 point_in_time_backtest이면 commentary.summary와 report.executive_summary의 첫 문장에 reference_time_label을 반드시 포함하라. "
-        "뉴스, 공급/수요, 재고, OPEC, 달러/금리, 위험선호, 차트 흐름 같은 애널리스트 언어를 사용하라. "
-        "내부 구현, 로컬 인코더, deterministic, structured context, 직접 표시할 뉴스 부족 같은 표현은 절대 쓰지 마라. "
-        "반드시 JSON object만 반환하라. 최상위 key는 commentary, news_context, report만 사용하라. "
-        "commentary는 summary, model_interpretation, risk_notes, warnings를 포함한다. "
-        "commentary.summary는 대시보드 상단 시황 카드용으로 2~3문장, 기준 가격/방향/핵심 배경을 압축하되 단순 반복으로 끝내지 마라. "
-        "commentary.model_interpretation은 3~5문장의 한 문단으로, 예측 경로가 왜 그런 방향으로 읽히는지 뉴스와 차트 흐름을 연결해 설명하라. "
-        "commentary.risk_notes는 3개 문자열 배열로, 전망이 흔들릴 수 있는 확인 변수를 각각 완전한 문장으로 적어라. "
-        "news_context는 summary, translated_news, context_points, warnings를 포함한다. "
-        "news_context.summary는 2~4문장으로 최신 뉴스 묶음의 공통 주제와 반대 논리를 함께 설명하라. "
-        "translated_news는 news_evidence의 source_index와 번역/요약 headline을 담고, 영어 원제목을 그대로 쓰지 마라. "
-        "context_points는 context_evidence의 source_index를 참조하고 overall_bias, explanation을 담는다. "
-        "각 explanation은 해당 시점의 뉴스/가격 맥락을 1~2문장으로 다르게 작성하고 summary 문장을 반복하지 마라. "
-        "report는 title, executive_summary, sections, recommendation_note, warnings를 포함한다. "
-        "report.executive_summary는 3~5문장으로 기간, 중앙 경로, 예상 범위, 핵심 조건을 모두 담아라. "
-        "report.sections는 정확히 4개로 작성하고 각 section은 title, body, bullets 배열을 가진다. "
-        "권장 section 관점은 핵심 전망, 시장 배경, 경로와 변동성, 확인 변수다. "
-        "각 section.body는 2~4문장, bullets는 2개이며, bullets도 완전한 문장으로 작성하라.\n\n"
-        + json.dumps(prompt_context, ensure_ascii=False)
-    )
-    try:
-        raw = (
+
+    def panel_prompt(panel: str) -> str:
+        panel_contracts = {
+            "commentary": (
+                "현재 요청은 AI 시황 해설 패널만 작성한다. "
+                "반드시 JSON object만 반환하라. 필수 key는 summary, model_interpretation, risk_notes, warnings다. "
+                "summary는 대시보드 상단 시황 카드용으로 2~3문장, 기준 가격/방향/핵심 배경을 압축하되 단순 반복으로 끝내지 마라. "
+                "model_interpretation은 3~5문장의 한 문단으로, 예측 경로가 왜 그런 방향으로 읽히는지 뉴스와 차트 흐름을 연결해 설명하라. "
+                "risk_notes는 3개 문자열 배열로, 전망이 흔들릴 수 있는 확인 변수를 각각 완전한 문장으로 적어라."
+            ),
+            "news_context": (
+                "현재 요청은 뉴스 해석 패널만 작성한다. "
+                "반드시 JSON object만 반환하라. 필수 key는 summary, translated_news, context_points, warnings다. "
+                "summary는 2~4문장으로 최신 뉴스 묶음의 공통 주제와 반대 논리를 함께 설명하라. "
+                "translated_news는 news_evidence의 source_index와 번역/요약 headline을 담고, 영어 원제목을 그대로 쓰지 마라. "
+                "context_points는 context_evidence의 source_index를 참조하고 overall_bias, explanation을 담는다. "
+                "각 explanation은 해당 시점의 뉴스/가격 맥락을 1~2문장으로 다르게 작성하고 summary 문장을 반복하지 마라."
+            ),
+            "report": (
+                "현재 요청은 예측 리포트 패널만 작성한다. "
+                "반드시 JSON object만 반환하라. 필수 key는 title, executive_summary, sections, recommendation_note, warnings다. "
+                "executive_summary는 3~5문장으로 기간, 중앙 경로, 예상 범위, 핵심 조건을 모두 담아라. "
+                "sections는 정확히 4개로 작성하고 각 section은 title, body, bullets 배열을 가진다. "
+                "권장 section 관점은 핵심 전망, 시장 배경, 경로와 변동성, 확인 변수다. "
+                "각 section.body는 2~4문장, bullets는 2개이며, bullets도 완전한 문장으로 작성하라."
+            ),
+        }
+        return (
+            "너는 원유 시장 전담 애널리스트이며, 원유 예측 대시보드의 한 패널 문안을 작성한다. "
+            "시황 해설, 뉴스 해석, 예측 리포트는 서로 다른 요청으로 생성되므로 shared_voice와 rules를 최우선으로 적용해 말투, 용어, 기준 시점 표현을 일관되게 유지하라. "
+            f"모든 사용자 표시 문장은 반드시 {output_language}로 작성하라. "
+            "뉴스, 공급/수요, 재고, OPEC, 달러/금리, 위험선호, 차트 흐름 같은 애널리스트 언어를 사용하라. "
+            "내부 구현, 로컬 인코더, deterministic, structured context, 직접 표시할 뉴스 부족 같은 표현은 절대 쓰지 마라. "
+            f"{panel_contracts[panel]}\n\n"
+            + json.dumps({**prompt_context, "target_panel": panel}, ensure_ascii=False)
+        )
+
+    def call_dashboard_llm(prompt: str) -> dict[str, Any]:
+        return (
             _google_model_commentary(settings, prompt)
             if settings.llm_context_mode == "google_generative"
             or "generativelanguage.googleapis.com" in settings.llm_api_base
             or settings.llm_model.lower().startswith("gemma-")
             else _openai_compatible_model_commentary(settings, prompt)
         )
+
+    def panel_result(panel: str) -> dict[str, Any]:
+        raw_panel = call_dashboard_llm(panel_prompt(panel))
+        nested = raw_panel.get(panel)
+        return nested if isinstance(nested, dict) else raw_panel
+
+    try:
+        raw = {
+            "commentary": panel_result("commentary"),
+            "news_context": panel_result("news_context"),
+            "report": panel_result("report"),
+        }
         normalized = _normalize_dashboard_analysis(
             raw=raw,
             bundle=bundle,

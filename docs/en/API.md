@@ -10,6 +10,7 @@ The API preserves compatibility with the existing chart frontend while exposing 
 | `GET /api/models` | model registry, artifact availability, metadata |
 | `GET /api/data-status?symbol=CL=F&interval=1d` | data source, resolved symbol, staleness |
 | `GET /api/forecast?symbol=CL=F&interval=1d` | candles, quantile forecast, scenarios, regime, model metadata |
+| `POST /api/scenarios/forecast` | converts a user-entered bundle of future events into horizon-level LLM event context and returns a scenario forecast path |
 | `GET /api/chart?symbol=CL=F&interval=1d&horizon=7` | legacy chart payload; backward-compatibility target |
 | `GET /api/market-context?symbol=CL=F&interval=1d` | news, context markers, scenario commentary |
 | `GET /api/dashboard-analysis?symbol=CL=F&interval=1d` | generates AI commentary, news interpretation, and forecast report with one external LLM call |
@@ -52,6 +53,36 @@ The new typed forecast contract includes:
 - `warnings`, `warning_objects`: degraded status and actions
 
 Forecast prices are reconstructed from volatility-scaled cumulative log returns.
+
+## `/api/scenarios/forecast`
+
+This additive endpoint processes a bundle of future events in one Scenario-mode folder. The request body accepts `title`, `content`, optional `event_time`, additive `events[]`, `symbol`, `interval`, `horizon`, and `models`. Each `events[]` item has `title`, `content`, and `event_time`.
+
+Processing flow:
+
+- The user input is sent to the external LLM context encoder.
+- The LLM may only return event type, directional bias, impact, uncertainty, and event embedding.
+- The backend converts multiple events into an event-context schedule across forecast horizons. For each horizon, only events that have occurred by that forecast time are active in the context.
+- `oil_context_fusion` uses the context vector for each horizon segment as an input feature and computes the numeric forecast path. Scenario paths do not add a post-processing adjustment array to model outputs.
+- If the LLM returns `p50`, `p90`, target prices, or future return paths, validation rejects that structured output.
+
+`event_time` is metadata for when the future event is expected to occur and the activation point for horizon-specific context. No future price information enters the model input; the event timestamp remains in the LLM input, `llm_context_summary.scenario_event_time`, and `llm_context_summary.model_context_schedule`. If `event_time` is omitted, the LLM interprets phrases such as “the day after tomorrow” or “next week” relative to `generated_at`, and the API returns a warning.
+
+Returned content:
+
+- `points`: chart overlay path for the scenario. The first point is the current-price anchor.
+- `forecast`: quantile forecast path
+- `llm_context_summary`: scenario override source, bias, impact, uncertainty, and horizon-level `model_context_schedule`
+- `llm_context`: validated structured event context
+- `warning_objects`: LLM fallback, missing event_time, artifact/data-quality warnings
+
+Example:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/scenarios/forecast" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Supply shock then output increase","content":"Hormuz blockade followed by OPEC production increase","events":[{"title":"Hormuz blockade","content":"Crude shipping disruption raises supply risk","event_time":"2026-06-21T00:00:00Z"},{"title":"OPEC output increase","content":"OPEC increases crude production","event_time":"2026-07-01T00:00:00Z"}],"symbol":"CL=F","interval":"1d","horizon":30}'
+```
 
 ## `/api/market-context`
 

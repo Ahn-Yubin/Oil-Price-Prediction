@@ -17,6 +17,7 @@ from backend.app.api.routes import forecast as forecast_route
 from backend.app.api.routes import market_context as market_context_route
 from backend.app.api.routes import models as models_route
 from backend.app.api.routes import report as report_route
+from backend.app.api.routes import scenarios as scenarios_route
 from market_ai.config import Settings
 from market_ai.modeling.deep.availability import DeepArtifactAvailability
 from market_ai.schemas.market import (
@@ -29,6 +30,8 @@ from market_ai.schemas.market import (
     MarketDataWindow,
     MarketSymbol,
     RegimeProbabilities,
+    ScenarioForecastResponse,
+    ScenarioPoint,
     Timeframe,
 )
 from market_ai.forecasting.service import ForecastBundle
@@ -245,6 +248,64 @@ def test_forecast_schema_endpoint(monkeypatch):
     assert response.status_code == 200
     assert body["forecast"][0]["p05"] <= body["forecast"][0]["p50"] <= body["forecast"][0]["p95"]
     assert body["data_status"]["status"] == "real"
+
+
+def test_scenario_forecast_endpoint_returns_event_context_path(monkeypatch):
+    captured = {}
+
+    def fake_build_scenario_forecast(**kwargs):
+        captured.update(kwargs)
+        return ScenarioForecastResponse(
+            scenario_id="scenario-unit",
+            title=kwargs["title"],
+            content=kwargs["content"],
+            symbol="CL=F",
+            interval="1d",
+            generated_at=datetime.now(timezone.utc),
+            event_time=kwargs.get("event_time"),
+            current_price=81.0,
+            points=[
+                ScenarioPoint(time=1_700_086_400, value=81.0),
+                ScenarioPoint(time=1_700_172_800, value=86.0),
+            ],
+            forecast=_forecast_bundle().response.forecast,
+            data_status=_data_status(),
+            primary_model="oil_context_fusion",
+            llm_context_summary={
+                "role": "context/event encoder only",
+                "event_context_source": "scenario_override",
+                "overall_bias": "bullish",
+            },
+            llm_context={"overall_bias": "bullish", "events": []},
+            warnings=[],
+        )
+
+    monkeypatch.setattr(scenarios_route, "build_scenario_forecast", fake_build_scenario_forecast)
+    client = TestClient(main.app)
+    response = client.post(
+        "/api/scenarios/forecast",
+        json={
+            "title": "Iran shock",
+            "content": "Hypothetical supply disruption in Iran.",
+            "event_time": "2026-06-14T00:00:00Z",
+            "events": [
+                {
+                    "title": "Hormuz disruption",
+                    "content": "Shipping disruption raises crude supply risk.",
+                    "event_time": "2026-06-21T00:00:00Z",
+                }
+            ],
+            "symbol": "CL=F",
+            "interval": "1d",
+        },
+    )
+    body = response.json()
+    assert response.status_code == 200
+    assert body["scenario_id"] == "scenario-unit"
+    assert body["points"][0]["value"] == 81.0
+    assert body["llm_context_summary"]["event_context_source"] == "scenario_override"
+    assert captured["events"][0].title == "Hormuz disruption"
+    assert "target_price" not in str(body).lower()
 
 
 def test_chart_backward_compatibility_endpoint(monkeypatch):
@@ -476,7 +537,7 @@ def test_forecast_report_endpoint_returns_user_summary(monkeypatch):
     assert "forecast_period" in english["key_metrics"]
 
 
-def test_dashboard_analysis_combines_three_panels_in_one_external_llm_call(monkeypatch):
+def test_dashboard_analysis_splits_panels_into_three_external_llm_calls(monkeypatch):
     bundle = _forecast_bundle()
     bundle.response.primary_model = "oil_context_fusion"
     bundle.forecast_models.append(
@@ -489,7 +550,7 @@ def test_dashboard_analysis_combines_three_panels_in_one_external_llm_call(monke
             ],
         }
     )
-    captured = {}
+    captured = {"prompts": []}
     reserve_calls = {"count": 0}
 
     monkeypatch.setattr(market_context_route, "build_forecast", lambda **kwargs: bundle)
@@ -499,11 +560,11 @@ def test_dashboard_analysis_combines_three_panels_in_one_external_llm_call(monke
         lambda: Settings(enable_external_llm_calls=True, llm_api_key="unit-key", llm_context_mode="openai"),
     )
 
-    def reserve_once():
-        reserve_calls["count"] += 1
+    def reserve_calls_for_panel(count=1):
+        reserve_calls["count"] += count
         return True
 
-    monkeypatch.setattr(market_context_route, "_reserve_llm_call", reserve_once)
+    monkeypatch.setattr(market_context_route, "_reserve_llm_calls", reserve_calls_for_panel)
 
     def fake_live_context(**kwargs):
         assert kwargs["settings"].enable_external_llm_calls is False
@@ -541,15 +602,16 @@ def test_dashboard_analysis_combines_three_panels_in_one_external_llm_call(monke
     monkeypatch.setattr(market_context_route, "build_live_event_context", fake_live_context)
 
     def fake_llm(_settings, prompt):
-        captured["prompt"] = prompt
-        return {
-            "commentary": {
+        captured["prompts"].append(prompt)
+        if '"target_panel": "commentary"' in prompt:
+            return {
                 "summary": "공급 차질 우려가 현재 예측의 핵심 배경입니다.",
                 "model_interpretation": "최근 뉴스와 차트 반등이 함께 상방 압력을 만들고 있습니다.",
                 "risk_notes": ["OPEC 증산 뉴스가 강해지면 흐름이 약해질 수 있습니다."],
                 "warnings": [],
-            },
-            "news_context": {
+            }
+        if '"target_panel": "news_context"' in prompt:
+            return {
                 "summary": "뉴스는 호르무즈 긴장과 OPEC 공급 대응 사이의 균형을 보여줍니다.",
                 "translated_news": [
                     {
@@ -565,8 +627,9 @@ def test_dashboard_analysis_combines_three_panels_in_one_external_llm_call(monke
                     }
                 ],
                 "warnings": [],
-            },
-            "report": {
+            }
+        if '"target_panel": "report"' in prompt:
+            return {
                 "title": "CL=F 1D 예측 리포트",
                 "executive_summary": "현재 예측은 완만한 상방 흐름을 우선 반영합니다.",
                 "sections": [
@@ -578,8 +641,8 @@ def test_dashboard_analysis_combines_three_panels_in_one_external_llm_call(monke
                 ],
                 "recommendation_note": "",
                 "warnings": [],
-            },
-        }
+            }
+        raise AssertionError(f"unexpected prompt: {prompt}")
 
     monkeypatch.setattr(market_context_route, "_openai_compatible_model_commentary", fake_llm)
     market_context_route._DASHBOARD_ANALYSIS_CACHE.clear()
@@ -589,7 +652,8 @@ def test_dashboard_analysis_combines_three_panels_in_one_external_llm_call(monke
     body = response.json()
 
     assert response.status_code == 200
-    assert reserve_calls["count"] == 1
+    assert reserve_calls["count"] == 3
+    assert len(captured["prompts"]) == 3
     assert body["mode"] == "llm_dashboard_analysis"
     assert body["llm_used"] is True
     assert body["commentary"]["mode"] == "llm_dashboard_commentary"
@@ -599,33 +663,83 @@ def test_dashboard_analysis_combines_three_panels_in_one_external_llm_call(monke
     assert "Deterministic local event" not in str(body)
     assert body["report"]["mode"] == "llm_dashboard_report"
     assert body["report"]["llm_used"] is True
-    assert "최상위 key는 commentary, news_context, report" in captured["prompt"]
-    assert "report.sections는 정확히 4개" in captured["prompt"]
-    assert "commentary.model_interpretation은 3~5문장" in captured["prompt"]
-    assert "checkpoints" in captured["prompt"]
-    assert "source_index" in captured["prompt"]
+    assert all("shared_voice" in prompt for prompt in captured["prompts"])
+    assert all("말투, 용어, 기준 시점 표현을 일관되게 유지" in prompt for prompt in captured["prompts"])
+    assert any('"target_panel": "commentary"' in prompt for prompt in captured["prompts"])
+    assert any('"target_panel": "news_context"' in prompt for prompt in captured["prompts"])
+    assert any('"target_panel": "report"' in prompt for prompt in captured["prompts"])
+    assert any("sections는 정확히 4개" in prompt for prompt in captured["prompts"])
+    assert any("model_interpretation은 3~5문장" in prompt for prompt in captured["prompts"])
+    assert all("checkpoints" in prompt for prompt in captured["prompts"])
+    assert any("source_index" in prompt for prompt in captured["prompts"])
     assert "target_price" not in str(body).lower()
 
     monkeypatch.setattr(market_context_route, "_forecast_bundle_for_commentary", lambda **kwargs: bundle)
     market_context_route._DASHBOARD_ANALYSIS_CACHE.clear()
+    captured["prompts"] = []
     response = client.get(
         "/api/dashboard-analysis?symbol=CL=F&interval=1d&horizon=1&language=ko&origin_time=1700000000"
     )
     origin_body = response.json()
     assert response.status_code == 200
+    assert reserve_calls["count"] == 6
+    assert len(captured["prompts"]) == 3
     assert "기준가" in origin_body["report"]["key_metrics"]
     assert "현재 예측은" not in str(origin_body)
-    assert "\"analysis_mode\": \"point_in_time_backtest\"" in captured["prompt"]
-    assert "reference_time_label" in captured["prompt"]
-    assert "현재, 최근, 지금, 금일" in captured["prompt"]
-    assert "존댓말" in captured["prompt"]
-    assert "첫 문장에 reference_time_label" in captured["prompt"]
+    assert all("\"analysis_mode\": \"point_in_time_backtest\"" in prompt for prompt in captured["prompts"])
+    assert all("reference_time_label" in prompt for prompt in captured["prompts"])
+    assert all("현재, 최근, 지금, 금일" in prompt for prompt in captured["prompts"])
+    assert all("존댓말" in prompt for prompt in captured["prompts"])
+    assert all("first sentence must explicitly include reference_time_label" in prompt for prompt in captured["prompts"])
 
 
 def test_dashboard_llm_json_parser_ignores_trailing_text():
     parsed = market_context_route._extract_commentary_json('{"commentary": {"summary": "요약"}}\n\n추가 설명')
 
     assert parsed == {"commentary": {"summary": "요약"}}
+
+
+def test_llm_provider_uses_configured_timeout(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"candidates":[{"content":{"parts":[{"text":"{\\"summary\\":\\"ok\\"}"}]}}]}'
+
+    def fake_urlopen(_request, *, timeout, context):
+        captured["timeout"] = timeout
+        captured["context"] = context
+        return FakeResponse()
+
+    monkeypatch.setattr(market_context_route.urllib.request, "urlopen", fake_urlopen)
+    settings = Settings(
+        llm_api_key="unit-key",
+        llm_context_mode="google_generative",
+        llm_api_base="https://generativelanguage.googleapis.com/v1beta",
+        llm_model="unit-model",
+        llm_request_timeout_seconds=77,
+    )
+
+    assert market_context_route._google_model_commentary(settings, "prompt") == {"summary": "ok"}
+    assert captured["timeout"] == 77
+    assert captured["context"] is not None
+
+
+def test_dashboard_report_missing_sections_is_not_rule_based_fallback():
+    with pytest.raises(ValueError, match="missing sections"):
+        market_context_route._dashboard_report_from_llm(
+            bundle=_forecast_bundle(),
+            raw_report={"executive_summary": "LLM summary only."},
+            forecast_facts={"horizon": 1, "key_metrics": {}},
+            generated_at=datetime.now(timezone.utc),
+            language="ko",
+        )
 
 
 def test_live_market_context_does_not_silently_use_cached_news(monkeypatch):
@@ -1172,7 +1286,7 @@ def test_backtest_visualization_endpoint_returns_point_in_time_payload(monkeypat
             market_data=point_in_time_market,
             forecast_models=bundle.forecast_models,
             metrics=bundle.metrics,
-            model_info=bundle.model_info,
+            model_info={"training_cutoff": "2023-01-01T00:00:00+00:00"},
             horizon=1,
         )
 
@@ -1190,3 +1304,7 @@ def test_backtest_visualization_endpoint_returns_point_in_time_payload(monkeypat
     assert body["metrics"]["metric_samples"] == 1
     assert "final_ape_pct" in body["metrics"]
     assert "shape_score" in body["metrics"]
+    assert body["backtest"]["leakage_audit_status"] == "post_artifact_cutoff"
+    assert body["backtest"]["is_post_training_cutoff"] is True
+    assert body["backtest"]["model_training_cutoff"] == "2023-01-01T00:00:00+00:00"
+    assert body["leakage_audit_status"] == "post_artifact_cutoff"

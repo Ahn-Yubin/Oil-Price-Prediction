@@ -130,6 +130,43 @@ class ScenarioResponse(BaseModel):
     bear: list[ScenarioPoint] = Field(default_factory=list)
 
 
+class ScenarioEventInput(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    content: str = Field(min_length=1, max_length=4000)
+    event_time: datetime
+
+
+class ScenarioForecastRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    content: str = Field(min_length=1, max_length=4000)
+    event_time: datetime | None = None
+    events: list[ScenarioEventInput] = Field(default_factory=list)
+    symbol: str | None = None
+    interval: str | None = None
+    horizon: int | None = Field(default=None, ge=1)
+    models: str | None = None
+    language: str = "ko"
+
+
+class ScenarioForecastResponse(BaseModel):
+    scenario_id: str
+    title: str
+    content: str
+    symbol: str
+    interval: str
+    generated_at: datetime
+    event_time: datetime | None = None
+    current_price: float
+    points: list[ScenarioPoint] = Field(default_factory=list)
+    forecast: list[ForecastPoint] = Field(default_factory=list)
+    data_status: DataStatus
+    primary_model: str | None = None
+    llm_context_summary: dict[str, Any] = Field(default_factory=dict)
+    llm_context: dict[str, Any] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    warning_objects: list[ForecastWarning] = Field(default_factory=list)
+
+
 class RegimeProbabilities(BaseModel):
     trend_up: float = 0.2
     trend_down: float = 0.2

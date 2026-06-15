@@ -252,6 +252,35 @@ def _apply_online_residual_calibration(
     }
 
 
+def _backtest_leakage_audit(payload: dict[str, Any], origin_candle: Candle) -> dict[str, Any]:
+    model_training_cutoff = payload.get("model_trained_at")
+    origin_time = datetime.fromtimestamp(origin_candle.time, tz=timezone.utc)
+    audit = {
+        "origin_time": origin_time.isoformat(),
+        "model_training_cutoff": model_training_cutoff,
+        "is_post_training_cutoff": None,
+        "leakage_audit_status": "training_cutoff_unavailable",
+    }
+    if not model_training_cutoff:
+        return audit
+    cutoff = pd.to_datetime(model_training_cutoff, errors="coerce", utc=True)
+    if pd.isna(cutoff):
+        audit["leakage_audit_status"] = "training_cutoff_invalid"
+        return audit
+    cutoff_dt = cutoff.to_pydatetime()
+    is_post_cutoff = origin_time > cutoff_dt
+    audit.update(
+        {
+            "model_training_cutoff": cutoff_dt.isoformat(),
+            "is_post_training_cutoff": is_post_cutoff,
+            "leakage_audit_status": "post_artifact_cutoff"
+            if is_post_cutoff
+            else "overlaps_artifact_sample_window",
+        }
+    )
+    return audit
+
+
 @router.get("/api/backtests")
 def backtests(symbol: str = Query(default=None), interval: str = Query(default=None)) -> dict[str, Any]:
     current_settings = get_settings()
@@ -353,6 +382,7 @@ def backtest_visualization(
 
     origin_candle = candles[origin_idx]
     payload = chart_payload_from_forecast(bundle)
+    leakage_audit = _backtest_leakage_audit(payload, origin_candle)
     online_calibration = (
         _apply_online_residual_calibration(
             payload=payload,
@@ -380,6 +410,9 @@ def backtest_visualization(
             "requested_origin_time": origin_ts,
             "origin_index": origin_idx,
             "actual_future_candles": actual_future,
+            "leakage_audit_status": leakage_audit["leakage_audit_status"],
+            "is_post_training_cutoff": leakage_audit["is_post_training_cutoff"],
+            "model_training_cutoff": leakage_audit["model_training_cutoff"],
             "backtest": {
                 "origin_time": origin_candle.time,
                 "origin_index": origin_idx,
@@ -389,6 +422,7 @@ def backtest_visualization(
                 "symbol": payload.get("symbol_resolved"),
                 "interval": payload.get("interval_resolved"),
                 "online_residual_calibration": online_calibration,
+                **leakage_audit,
             },
         }
     )

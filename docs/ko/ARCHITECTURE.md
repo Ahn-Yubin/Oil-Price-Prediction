@@ -56,6 +56,7 @@ LLM은 numeric forecast path를 생성하지 않습니다.
 - `/api/chart`: 기존 chart compatibility contract
 - `/api/market-context`: 뉴스/context marker와 scenario commentary
 - `/api/dashboard-analysis`: AI 시황 해설, 뉴스 해석, 예측 리포트를 한 번의 외부 LLM 호출로 생성
+- `/api/scenarios/forecast`: 사용자 입력 미래 사건을 event-context override로 바꿔 scenario forecast 생성
 - `/api/backtests/visualization`: 과거 origin 기준 forecast overlay와 실제 이후 candle
 - `/api/explanation`: forecast explanation
 - `/api/models`, `/api/data-status`, `/api/backtests`: 운영/진단 endpoint

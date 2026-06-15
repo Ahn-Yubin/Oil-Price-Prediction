@@ -13,7 +13,7 @@ The frontend is a WTI oil (`CL=F`) TradingView Lightweight Charts-style forecast
 
 The UI calls `/api/forecast` first and uses `/api/chart` compatibility payloads when needed. `/api/chart` must remain compatible with the existing overlay.
 
-The desktop screen uses a three-column layout: chart plus AI chat on the left, AI market commentary/news interpretation in the middle, and the forecast report on the right. The three AI panels prefer `/api/dashboard-analysis`, which returns market commentary, news interpretation, and report prose from one external LLM response. When a user selects a historical candle and runs a backtest visualization, the chart calls `/api/backtests/visualization`. When a backtest origin is active, the news interpretation panel requests point-in-time news/event context up to the same `origin_time` instead of live current news, and generated prose uses absolute dates/times rather than live relative wording.
+The desktop screen uses a three-column layout: chart plus AI chat on the left, AI market commentary/news interpretation in the middle, and the forecast report on the right. The three AI panels prefer `/api/dashboard-analysis`, which returns market commentary, news interpretation, and report prose from one external LLM response. The chart mode control is a three-way `Backtest / Live / Scenario` segmented control. When a user selects a historical candle and runs a backtest visualization, the chart calls `/api/backtests/visualization`. In Scenario mode, the UI groups future events into scenario folders, calls `/api/scenarios/forecast`, and draws the returned path as a scenario-specific overlay above the live forecast. When a backtest origin is active, the news interpretation panel requests point-in-time news/event context up to the same `origin_time` instead of live current news, and generated prose uses absolute dates/times rather than live relative wording.
 
 - `news`: recent headlines and sources
 - `context_points`: event/context dates for chart markers and news interpretation rows
@@ -26,6 +26,13 @@ The backtest visualization payload keeps the same base chart keys and adds:
 - `origin_time`: historical candle time used to rebuild the forecast
 - `actual_future_candles`: realized OHLCV after the origin
 - `backtest`: history/future row counts and horizon metadata
+
+The scenario forecast payload is kept in the list-style bottom panel.
+
+- `points`: scenario chart overlay. The first point is the current-price anchor.
+- `llm_context_summary`: LLM-derived bias/impact/uncertainty, `scenario_override` source, and horizon-level `model_context_schedule`
+- `llm_context`: validated structured event context
+- `warning_objects`: missing event_time, LLM fallback, and artifact/data-quality warnings
 
 The dashboard analysis payload explains the single operational model forecast path through the LLM. The commentary is analyst-style market reasoning based on news and chart action, not a technical description of the model internals. The LLM is only an explainer of already-produced model outputs, not a new numeric price forecaster. The UI renders commentary as body-style paragraphs in the selected language and does not list raw English headlines in Korean mode. Standalone `/api/model-commentary`, `/api/market-context`, and `/api/report` remain compatibility/diagnostic paths.
 
@@ -50,6 +57,8 @@ Markers indicate what context existed around that date. They are not numeric pri
 - The forecast-length selector was removed. The backend runs one h30 artifact, and the UI marks the 1-week, 2-week, and 1-month endpoints on the same 30-day path.
 - The only user-facing model is `oil_context_fusion`. Older models remain only as internal benchmark/fallback paths.
 - `/api/forecast`, `/api/chart`, `/api/dashboard-analysis`, and `/api/backtests/visualization` receive the same horizon/origin/language key.
+- Scenario mode keeps the live forecast as the baseline and draws user-added scenarios as separate line overlays. Each scenario can be shown or hidden from the toggle inside the list.
+- A scenario is a folder with a title. Event input consists of title, event time, and content. Event time is used as the activation point for horizon-level model context inside the forecast window.
 - In desktop landscape, the chart and chat share the left column in a 2:1 row ratio, and the dashboard frame adjusts row heights to fill the viewport.
 - The AI chat panel sits below the chart. The full panel is the message area; the title header and bottom input area are fixed neutral-glass overlays matching the commentary/news/report headers.
 - Middle/right side panels use internal scroll only under constrained viewport conditions, with max-height limits to avoid fighting the page scroll.
